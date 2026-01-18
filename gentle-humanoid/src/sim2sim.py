@@ -177,16 +177,36 @@ class Sim2sim:
         while self.low_cmd is None:
             continue
         print(f'Connected to high level')
+        
+        # Auto mode: skip key press
+        if getattr(self.args, 'auto', False):
+            print('[Auto] Skipping "s" key press')
+            return
+            
         print(f'Press "s" to move to default pose')
         running_zero_cmd = True
         while running_zero_cmd:
             running_zero_cmd = self.low_state.wireless_remote[0] != KeyMap.start
 
     def simulate_gantry(self):
-        print(
-            f'''Moving to default pose...\n'''
-            f'''Press "a" after the robot is in default pose to being control loop'''
-        )
+        print(f'Moving to default pose...')
+        
+        # Auto mode: skip key press, just wait for stable state
+        if getattr(self.args, 'auto', False):
+            print('[Auto] Waiting 1 second for robot to stabilize...')
+            timer = Timer(self.low_level_dt)
+            for _ in range(int(1.0 / self.low_level_dt)):  # 1 second
+                ptargets_mujoco = self.real_to_mujoco_mapper.map_action_from_to(self.__ptargets_real)
+                self.data.qpos[:7] = [0, 0, 2, 1.0, 0.0, 0.0, 0.0]
+                self.data.qpos[7:] = ptargets_mujoco
+                mujoco.mj_forward(self.model, self.data)
+                if not self._viewer_sync():
+                    return
+                timer.sleep()
+            print('[Auto] Proceeding to control loop')
+            return
+        
+        print(f'Press "a" after the robot is in default pose to begin control loop')
         timer = Timer(self.low_level_dt)
         while True:
             ptargets_mujoco = self.real_to_mujoco_mapper.map_action_from_to(self.__ptargets_real)
@@ -311,6 +331,7 @@ class Sim2sim:
 if __name__ == "__main__":
     '''
     python sim2sim.py --xml_path g1_description/g1.xml
+    python sim2sim.py --auto  # Auto mode: skip key presses
     '''
     try:
         import multiprocessing as mp
@@ -322,6 +343,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     default_xml = ASSETS_DIR / "g1" / "g1.xml"
     parser.add_argument("--xml_path", type=str, default=str(default_xml))
+    parser.add_argument("--auto", action='store_true', help="Auto mode: skip manual key presses")
     args = parser.parse_args()
 
     config_path = Path(ASSETS_DIR).parents[0] / "config" / "controller.yaml"

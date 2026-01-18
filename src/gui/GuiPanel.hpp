@@ -101,6 +101,13 @@ public:
     uint64_t streamFramesSent = 0;       // 已发送帧数
     std::string streamHost = "127.0.0.1";
     int streamPort = 28563;
+    
+    // ===== 仿真控制 (gentle-humanoid sim2sim + deploy) =====
+    bool simStartAllPressed = false;     // 启动全部按钮
+    bool simStopAllPressed = false;      // 停止全部按钮
+    bool sim2simRunning = false;         // sim2sim 运行状态（由外部设置）
+    bool deployRunning = false;          // deploy 运行状态（由外部设置）
+    bool autoConnectStream = true;       // 启动后自动连接流式传输
 
 private:
     bool m_visible = true;

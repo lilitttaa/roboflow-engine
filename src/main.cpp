@@ -1,5 +1,6 @@
 #include "core/Application.hpp"
 #include "core/OrbitCamera.hpp"
+#include "core/ProcessManager.hpp"
 #include "scene/Scene.hpp"
 #include "scene/Entity.hpp"
 #include "robot/RobotEntity.hpp"
@@ -12,6 +13,7 @@
 #include <cmath>
 #include <iostream>
 #include <array>
+#include <filesystem>
 
 /**
  * DemoApp - 演示应用
@@ -47,6 +49,24 @@ protected:
         floor->primitiveType = mf::MeshEntity::PrimitiveType::Plane;
         floor->size = { 10.0f, 1.0f, 10.0f };
         floor->color = { 40, 40, 45, 255 };
+        
+        // 初始化进程管理器
+        // 获取当前可执行文件路径，推算 gentle-humanoid 路径
+        std::filesystem::path exePath = std::filesystem::current_path();
+        // 尝试多个可能的路径
+        std::filesystem::path ghPath = exePath / "gentle-humanoid";
+        if (!std::filesystem::exists(ghPath)) {
+            ghPath = exePath.parent_path() / "gentle-humanoid";
+        }
+        if (!std::filesystem::exists(ghPath)) {
+            ghPath = exePath.parent_path().parent_path() / "gentle-humanoid";
+        }
+        if (std::filesystem::exists(ghPath)) {
+            m_processManager.setGentleHumanoidPath(ghPath.string());
+            std::cout << "[ProcessManager] gentle-humanoid path: " << ghPath.string() << std::endl;
+        } else {
+            std::cerr << "[ProcessManager] WARNING: gentle-humanoid directory not found!" << std::endl;
+        }
         
         // 加载 G1 机器人
         m_robot = std::make_unique<mf::RobotEntity>();
@@ -105,8 +125,34 @@ protected:
             m_robot->update();
             
             // 流式传输动作数据到 gentle-humanoid
+            // 只要连接就持续发送，不管动画是否在播放
             if (m_streamer.isConnected() && m_guiPanel.streamEnabled) {
                 sendStreamFrame();
+            }
+        }
+        
+        // 即使机器人没加载，只要连接了也发送心跳
+        if (m_streamer.isConnected() && m_guiPanel.streamEnabled && !m_robotLoaded) {
+            // 发送默认帧保持连接
+            std::array<float, mf::JointMapper::NUM_JOINTS> zeros;
+            zeros.fill(0.0f);
+            float rootPos[3] = {0, 0, 0.8f};
+            float rootQuat[4] = {1, 0, 0, 0};
+            m_streamer.sendMotion(GetTime(), zeros.data(), 29, rootQuat, rootPos);
+        }
+        
+        // 自动连接流式传输（仿真启动后延迟连接）
+        if (m_autoConnectDelay > 0) {
+            m_autoConnectDelay -= deltaTime;
+            if (m_autoConnectDelay <= 0 && m_guiPanel.autoConnectStream && 
+                m_processManager.isAllRunning() && !m_streamer.isConnected()) {
+                std::cout << "[Stream] Auto-connecting..." << std::endl;
+                if (m_streamer.connect(m_guiPanel.streamHost, m_guiPanel.streamPort)) {
+                    m_streamStartTime = GetTime();
+                    m_guiPanel.streamEnabled = true;
+                    std::cout << "[Stream] Auto-connected to " << m_guiPanel.streamHost 
+                              << ":" << m_guiPanel.streamPort << std::endl;
+                }
             }
         }
         
@@ -126,20 +172,33 @@ protected:
         mf::JointMapper::mapJointPositions(jointMap, mappedJoints);
         
         // 获取根节点位置和旋转
-        // 从机器人位置转换（注意坐标系转换）
+        // gentle-humanoid 使用 Z-up 坐标系
         float rootPos[3] = {
             m_robot->position.x,
-            m_robot->position.z,  // raylib Y-up -> gentle-humanoid Z-up
-            m_robot->position.y
+            m_robot->position.z,
+            m_robot->position.y + 0.8f  // 加上机器人高度
         };
         
-        // 四元数 (wxyz) - 从欧拉角转换
-        // 简化处理：使用单位四元数
+        // 四元数 (wxyz) - 使用单位四元数
         float rootQuat[4] = { 1.0f, 0.0f, 0.0f, 0.0f };
         
         // 发送
         double timestamp = GetTime() - m_streamStartTime;
         m_streamer.sendMotion(timestamp, mappedJoints.data(), 29, rootQuat, rootPos);
+        
+        // 每100帧打印一次详细调试信息
+        static int debugCounter = 0;
+        if (++debugCounter % 100 == 0) {
+            // 打印原始 URDF 关节值
+            float leg_l1 = jointMap.count("leg_l1_joint") ? jointMap["leg_l1_joint"] : -999;
+            float leg_l4 = jointMap.count("leg_l4_joint") ? jointMap["leg_l4_joint"] : -999;
+            
+            std::cout << "[Stream] Frame " << m_streamer.getFramesSent() << std::endl;
+            std::cout << "  URDF: leg_l1=" << leg_l1 << " leg_l4=" << leg_l4 << std::endl;
+            std::cout << "  Mapped: [0]=" << mappedJoints[0] 
+                      << " [3]=" << mappedJoints[3] 
+                      << " [6]=" << mappedJoints[6] << std::endl;
+        }
     }
     
     void handleGuiInput() {
@@ -227,6 +286,28 @@ protected:
         }
         if (m_guiPanel.streamDisconnectPressed && m_streamer.isConnected()) {
             m_streamer.disconnect();
+        }
+        
+        // 仿真控制
+        if (m_guiPanel.simStartAllPressed) {
+            std::cout << "[Simulation] Starting sim2sim and deploy..." << std::endl;
+            if (m_processManager.startAll(true)) {  // auto mode
+                std::cout << "[Simulation] Started successfully" << std::endl;
+                // 如果启用了自动连接，等待一段时间后连接流式传输
+                if (m_guiPanel.autoConnectStream) {
+                    m_autoConnectDelay = 3.0f;  // 3 秒后自动连接
+                }
+            } else {
+                std::cerr << "[Simulation] Failed to start" << std::endl;
+            }
+        }
+        if (m_guiPanel.simStopAllPressed) {
+            std::cout << "[Simulation] Stopping all processes..." << std::endl;
+            m_processManager.stopAll();
+            // 也断开流式传输
+            if (m_streamer.isConnected()) {
+                m_streamer.disconnect();
+            }
         }
     }
     
@@ -329,6 +410,10 @@ protected:
         // 同步流式传输状态
         m_guiPanel.streamConnected = m_streamer.isConnected();
         m_guiPanel.streamFramesSent = m_streamer.getFramesSent();
+        
+        // 同步仿真进程状态
+        m_guiPanel.sim2simRunning = m_processManager.isSim2SimRunning();
+        m_guiPanel.deployRunning = m_processManager.isDeployRunning();
     }
 
     void onRender() override {
@@ -384,6 +469,7 @@ protected:
 private:
     mf::Scene m_scene;
     mf::GuiPanel m_guiPanel;
+    mf::ProcessManager m_processManager;  // 管理 sim2sim/deploy 进程
     std::unique_ptr<mf::RobotEntity> m_robot;
     std::unique_ptr<mf::MotionPlayer> m_motionPlayer;
     mf::UDPStreamer m_streamer;  // UDP 流式传输到 gentle-humanoid
@@ -400,6 +486,9 @@ private:
     
     // 流式传输时间戳
     double m_streamStartTime = 0.0;
+    
+    // 自动连接延迟计时器
+    float m_autoConnectDelay = 0.0f;
 };
 
 int main() {

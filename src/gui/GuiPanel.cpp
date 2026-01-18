@@ -80,6 +80,8 @@ void GuiPanel::render() {
     showGridToggled = false;
     streamConnectPressed = false;
     streamDisconnectPressed = false;
+    simStartAllPressed = false;
+    simStopAllPressed = false;
     
     if (!m_visible) {
         // 显示提示
@@ -276,8 +278,46 @@ void GuiPanel::render() {
     DrawLine(x, y, x + width, y, Color{80, 80, 80, 255});
     y += 10;
     
-    // ===== 流式传输 (Gentle-Humanoid) =====
-    GuiLabel(Rectangle{(float)x, (float)y, (float)width, 20}, "Stream to Robot");
+    // ===== 仿真控制 (Gentle-Humanoid) =====
+    GuiLabel(Rectangle{(float)x, (float)y, (float)width, 20}, "Simulation Control");
+    y += 22;
+    
+    // 进程状态
+    {
+        const char* sim2simStatus = sim2simRunning ? "Running" : "Stopped";
+        Color sim2simColor = sim2simRunning ? Color{100, 200, 100, 255} : Color{150, 150, 150, 255};
+        DrawText(TextFormat("sim2sim: %s", sim2simStatus), x, y, 12, sim2simColor);
+        y += 16;
+        
+        const char* deployStatus = deployRunning ? "Running" : "Stopped";
+        Color deployColor = deployRunning ? Color{100, 200, 100, 255} : Color{150, 150, 150, 255};
+        DrawText(TextFormat("deploy: %s", deployStatus), x, y, 12, deployColor);
+        y += 20;
+    }
+    
+    // 启动/停止按钮
+    bool allRunning = sim2simRunning && deployRunning;
+    if (!allRunning) {
+        if (GuiButton(Rectangle{(float)x, (float)y, (float)width, 30}, "Start Simulation")) {
+            simStartAllPressed = true;
+        }
+    } else {
+        if (GuiButton(Rectangle{(float)x, (float)y, (float)width, 30}, "Stop Simulation")) {
+            simStopAllPressed = true;
+        }
+    }
+    y += 38;
+    
+    // 自动连接选项
+    GuiCheckBox(Rectangle{(float)x, (float)y, 20, 20}, "Auto Connect Stream", &autoConnectStream);
+    y += 30;
+    
+    // 分隔线
+    DrawLine(x, y, x + width, y, Color{80, 80, 80, 255});
+    y += 10;
+    
+    // ===== 流式传输 =====
+    GuiLabel(Rectangle{(float)x, (float)y, (float)width, 20}, "Motion Streaming");
     y += 22;
     
     // 连接状态
@@ -293,11 +333,11 @@ void GuiPanel::render() {
     
     // 连接/断开按钮
     if (!streamConnected) {
-        if (GuiButton(Rectangle{(float)x, (float)y, (float)width, 28}, "Connect")) {
+        if (GuiButton(Rectangle{(float)x, (float)y, (float)width, 28}, "Connect Stream")) {
             streamConnectPressed = true;
         }
     } else {
-        if (GuiButton(Rectangle{(float)x, (float)y, (float)width, 28}, "Disconnect")) {
+        if (GuiButton(Rectangle{(float)x, (float)y, (float)width, 28}, "Disconnect Stream")) {
             streamDisconnectPressed = true;
         }
     }

@@ -142,8 +142,8 @@ class MotionStreamServer(threading.Thread):
                                 self._connected = True
                                 print(f"[MotionStreamServer] Connected from {addr}")
             except socket.timeout:
-                # Check for disconnect (no data for 1 second)
-                if self._connected and time.time() - self._last_receive_time > 1.0:
+                # Check for disconnect (no data for 5 seconds)
+                if self._connected and time.time() - self._last_receive_time > 5.0:
                     self._connected = False
                     print(f"[MotionStreamServer] Disconnected (timeout)")
                 continue

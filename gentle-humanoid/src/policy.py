@@ -421,6 +421,10 @@ class TrackingPolicy(Policy):
         root_quat = frame['root_quat_w'].reshape(1, 4)  # (1, 4) wxyz
         root_pos = frame['root_pos_w'].reshape(1, 3)    # (1, 3)
         
+        # Debug output (every 50 frames)
+        if self._stream_server and self._stream_server._frames_received % 50 == 1:
+            print(f"[Stream] Received frame | joints[0:3]={joint_pos[0, :3]} | height={root_pos[0, 2]:.3f}")
+        
         # Map joints if needed
         joint_pos = mapping_joints(joint_pos, self.config.dataset_joint_names)
         

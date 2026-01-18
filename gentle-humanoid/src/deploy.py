@@ -150,6 +150,15 @@ class Controller:
 
     def zero_torque_state(self):
         print("Enter zero torque state.")
+        
+        # Auto mode: skip waiting for start signal
+        if getattr(self.args, 'auto', False):
+            print("[Auto] Skipping start signal wait")
+            create_zero_cmd(self.low_cmd)
+            self.send_cmd(self.low_cmd)
+            time.sleep(0.1)  # Brief wait
+            return
+        
         print("Waiting for the start signal...")
         while self.remote_controller.button[KeyMap.start] != 1:
             create_zero_cmd(self.low_cmd)
@@ -181,27 +190,44 @@ class Controller:
     def default_qpos_state(self):
         initial_policy: Optional[Policy] = None
 
-        print("Press A to tracking policy...")
+        # Auto mode: automatically select tracking policy
+        if getattr(self.args, 'auto', False):
+            print("[Auto] Auto-selecting tracking policy...")
+            # Wait a moment for initialization
+            for _ in range(10):
+                self.process_state()
+                for i in range(self.dof_size_real):
+                    self.low_cmd.motor_cmd[i].q  = self.init_qpos_real[i]
+                    self.low_cmd.motor_cmd[i].qd = 0
+                    self.low_cmd.motor_cmd[i].kp = self.kps_real[i]
+                    self.low_cmd.motor_cmd[i].kd = self.kds_real[i]
+                    self.low_cmd.motor_cmd[i].tau = 0
+                self.send_cmd(self.low_cmd)
+                time.sleep(self.control_dt)
+            initial_policy = self.policies["tracking"]
+            print("Initial policy: tracking")
+        else:
+            print("Press A to tracking policy...")
 
-        while True:
-            self.process_state()
-            
-            for i in range(self.dof_size_real):
-                self.low_cmd.motor_cmd[i].q  = self.init_qpos_real[i]
-                self.low_cmd.motor_cmd[i].qd = 0
-                self.low_cmd.motor_cmd[i].kp = self.kps_real[i]
-                self.low_cmd.motor_cmd[i].kd = self.kds_real[i]
-                self.low_cmd.motor_cmd[i].tau = 0
-            self.send_cmd(self.low_cmd)
-            time.sleep(self.control_dt)
+            while True:
+                self.process_state()
+                
+                for i in range(self.dof_size_real):
+                    self.low_cmd.motor_cmd[i].q  = self.init_qpos_real[i]
+                    self.low_cmd.motor_cmd[i].qd = 0
+                    self.low_cmd.motor_cmd[i].kp = self.kps_real[i]
+                    self.low_cmd.motor_cmd[i].kd = self.kds_real[i]
+                    self.low_cmd.motor_cmd[i].tau = 0
+                self.send_cmd(self.low_cmd)
+                time.sleep(self.control_dt)
 
-            if self.btn_rise[KeyMap.select] == 1:
-                raise KeyboardInterrupt
+                if self.btn_rise[KeyMap.select] == 1:
+                    raise KeyboardInterrupt
 
-            if self.btn_rise[KeyMap.A]:
-                initial_policy = self.policies["tracking"]
-                print("Initial policy: tracking")
-                break
+                if self.btn_rise[KeyMap.A]:
+                    initial_policy = self.policies["tracking"]
+                    print("Initial policy: tracking")
+                    break
 
         self.current_policy = initial_policy
         self.smoothing_alpha = self.current_policy.lowstate_alpha
@@ -289,6 +315,7 @@ if __name__ == "__main__":
     parser.add_argument("--net", type=str, default=None)
     parser.add_argument("--sim2sim", action='store_true')
     parser.add_argument("--real", action='store_true')
+    parser.add_argument("--auto", action='store_true', help="Auto mode: skip manual key presses and auto-select tracking policy")
     args = parser.parse_args()
     assert args.sim2sim ^ args.real, "Please specify either sim2sim or real."
 
