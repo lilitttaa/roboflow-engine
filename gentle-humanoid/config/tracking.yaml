@@ -1,0 +1,77 @@
+policy_path: "assets/ckpts/G1/policy.onnx"
+lowstate_alpha: 1.0
+
+# Stream mode settings (MotionFlow integration)
+stream_enable: true
+stream_host: "127.0.0.1"
+stream_port: 28563
+
+motions:
+  - name: "hug"
+    path: "assets/data/hug.npy"
+    start: 180
+    end: -1
+  - name: "pick_ball(from video)"
+    path: "assets/data/pick_ball.npy"
+    start: 0
+    end: -1
+  - name: "walk"
+    path: "assets/data/walk.npy"
+    start: 0
+    end: 1000
+  - name: "drag_object(from video)"
+    path: "assets/data/drag_object.npy"
+    start: 0
+    end: -1
+  - name: "move_object(from video)"
+    path: "assets/data/move_object.npy"
+    start: 0
+    end: -1
+motion_clips:
+  - name: "default"
+    joint_pos: [-0.2800000011920929, 0.0, 0.0, 0.5, -0.23000000417232513, 0.0, -0.2800000011920929, 0.0, 0.0, 0.5, -0.23000000417232513, 0.0, 0.0, 0.3499999940395355, 0.1599999964237213, 0.0, 0.8700000047683716, 0.0, 0.3499999940395355, -0.1599999964237213, 0.0, 0.8700000047683716, 0.0]
+    root_quat: [1., 0., 0., 0.]
+    root_pos: [0.0, 0.0, 0.0]
+  - name: "arm_wrestle"
+    joint_pos: [-0.2800000011920929, 0.0, 0.0, 0.5, -0.23000000417232513, 0.0, -0.2800000011920929, 0.0, 0.0, 0.5, -0.23000000417232513, 0.0, 0.0, 0.3499999940395355, 0.1599999964237213, 0.0, 0.8700000047683716, 0.0, -1.1399999856948853, 0.0, 0.0, 0.3499999940395355, 0.0]
+    root_quat: [1., 0., 0., 0.]
+    root_pos: [0.0, 0.0, 0.0]
+  - name: "shake_hand"
+    joint_pos: [-0.2800000011920929, 0.0, 0.0, 0.5, -0.23000000417232513, 0.0, -0.2800000011920929, 0.0, 0.0, 0.5, -0.23000000417232513, 0.0, 0.0, 0.3499999940395355, 0.1599999964237213, 0.0, 0.8700000047683716, 0.0, -0.8, 0.0, 0.0, 1.0, 0.0]
+    root_quat: [1., 0., 0., 0.]
+    root_pos: [0.0, 0.0, 0.0]
+
+action_alpha: 0.9
+action_clip: 10.0
+adapt_hx_size: 256
+
+action_joint_names: ['left_hip_pitch_joint', 'right_hip_pitch_joint', 'waist_yaw_joint', 'left_hip_roll_joint', 'right_hip_roll_joint', 'waist_roll_joint', 'left_hip_yaw_joint', 'right_hip_yaw_joint', 'waist_pitch_joint', 'left_knee_joint', 'right_knee_joint', 'left_shoulder_pitch_joint', 'right_shoulder_pitch_joint', 'left_ankle_pitch_joint', 'right_ankle_pitch_joint', 'left_shoulder_roll_joint', 'right_shoulder_roll_joint', 'left_ankle_roll_joint', 'right_ankle_roll_joint', 'left_shoulder_yaw_joint', 'right_shoulder_yaw_joint', 'left_elbow_joint', 'right_elbow_joint', 'left_wrist_roll_joint', 'right_wrist_roll_joint', 'left_wrist_pitch_joint', 'right_wrist_pitch_joint', 'left_wrist_yaw_joint', 'right_wrist_yaw_joint']
+action_scale: [0.5, 0.5, 0.25, 0.25, 0.25, 0.25, 0.25, 0.25, 0.25, 0.5, 0.5, 1.0, 1.0, 0.5, 0.5, 1.0, 1.0, 0.5, 0.5, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
+
+dataset_joint_names: ["left_hip_pitch_joint", "left_hip_roll_joint", "left_hip_yaw_joint", "left_knee_joint", "left_ankle_pitch_joint", "left_ankle_roll_joint", "right_hip_pitch_joint", "right_hip_roll_joint", "right_hip_yaw_joint", "right_knee_joint", "right_ankle_pitch_joint", "right_ankle_roll_joint", "waist_yaw_joint", "waist_roll_joint", "waist_pitch_joint", "left_shoulder_pitch_joint", "left_shoulder_roll_joint", "left_shoulder_yaw_joint", "left_elbow_joint", "left_wrist_roll_joint", "left_wrist_pitch_joint", "left_wrist_yaw_joint", "right_shoulder_pitch_joint", "right_shoulder_roll_joint", "right_shoulder_yaw_joint", "right_elbow_joint", "right_wrist_roll_joint", "right_wrist_pitch_joint", "right_wrist_yaw_joint"]
+
+kps_real: [
+  # left leg
+  40.17923847137318, 99.09842777666113, 40.17923847137318, 99.09842777666113, 28.50124619574858, 28.50124619574858,
+  # right leg
+  40.17923847137318, 99.09842777666113, 40.17923847137318, 99.09842777666113, 28.50124619574858, 28.50124619574858,
+  # waist
+  40.17923847137318, 28.50124619574858, 28.50124619574858,
+  # left arm
+  14.25062309787429, 14.25062309787429, 14.25062309787429, 14.25062309787429, 14.25062309787429, 16.77832748089279, 16.77832748089279,
+  # right arm
+  14.25062309787429, 14.25062309787429, 14.25062309787429, 14.25062309787429, 14.25062309787429, 16.77832748089279, 16.77832748089279,
+]
+
+kds_real: [
+  # left leg
+  2.5578897650279457, 6.3088018534966395, 2.5578897650279457, 6.3088018534966395, 1.814445686584846, 1.814445686584846,
+  # right leg
+  2.5578897650279457, 6.3088018534966395, 2.5578897650279457, 6.3088018534966395, 1.814445686584846, 1.814445686584846,
+  # waist
+  2.5578897650279457, 1.814445686584846, 1.814445686584846,
+  # left arm
+  0.907222843292423, 0.907222843292423, 0.907222843292423, 0.907222843292423, 0.907222843292423, 1.06814150219, 1.06814150219,
+  # right arm
+  0.907222843292423, 0.907222843292423, 0.907222843292423, 0.907222843292423, 0.907222843292423, 1.06814150219, 1.06814150219,
+]

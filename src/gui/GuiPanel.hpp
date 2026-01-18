@@ -92,6 +92,15 @@ public:
     bool showAxes = false;
     bool showGridToggled = false;
     bool showGrid = true;
+    
+    // ===== 流式传输控制 (gentle-humanoid 集成) =====
+    bool streamConnectPressed = false;
+    bool streamDisconnectPressed = false;
+    bool streamEnabled = false;          // 是否启用流式传输
+    bool streamConnected = false;        // 连接状态（由外部设置）
+    uint64_t streamFramesSent = 0;       // 已发送帧数
+    std::string streamHost = "127.0.0.1";
+    int streamPort = 28563;
 
 private:
     bool m_visible = true;

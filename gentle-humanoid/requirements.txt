@@ -1,0 +1,8 @@
+linuxfd
+mujoco
+numpy
+onnxruntime
+PyQt6
+pyyaml
+scipy
+sshkeyboard

@@ -5,10 +5,13 @@
 #include "robot/RobotEntity.hpp"
 #include "motion/MotionPlayer.hpp"
 #include "gui/GuiPanel.hpp"
+#include "network/UDPStreamer.hpp"
+#include "network/JointMapper.hpp"
 #include <raylib.h>
 #include <rlgl.h>
 #include <cmath>
 #include <iostream>
+#include <array>
 
 /**
  * DemoApp - 演示应用
@@ -100,10 +103,43 @@ protected:
             }
             
             m_robot->update();
+            
+            // 流式传输动作数据到 gentle-humanoid
+            if (m_streamer.isConnected() && m_guiPanel.streamEnabled) {
+                sendStreamFrame();
+            }
         }
         
         // 同步状态到 GUI（在渲染前）
         syncGuiState();
+    }
+    
+    void sendStreamFrame() {
+        // 获取当前关节位置
+        std::map<std::string, float> jointMap;
+        for (const auto& name : m_jointNames) {
+            jointMap[name] = m_robot->getJointPosition(name);
+        }
+        
+        // 映射到 gentle-humanoid 格式 (29 关节)
+        std::array<float, mf::JointMapper::NUM_JOINTS> mappedJoints;
+        mf::JointMapper::mapJointPositions(jointMap, mappedJoints);
+        
+        // 获取根节点位置和旋转
+        // 从机器人位置转换（注意坐标系转换）
+        float rootPos[3] = {
+            m_robot->position.x,
+            m_robot->position.z,  // raylib Y-up -> gentle-humanoid Z-up
+            m_robot->position.y
+        };
+        
+        // 四元数 (wxyz) - 从欧拉角转换
+        // 简化处理：使用单位四元数
+        float rootQuat[4] = { 1.0f, 0.0f, 0.0f, 0.0f };
+        
+        // 发送
+        double timestamp = GetTime() - m_streamStartTime;
+        m_streamer.sendMotion(timestamp, mappedJoints.data(), 29, rootQuat, rootPos);
     }
     
     void handleGuiInput() {
@@ -177,6 +213,20 @@ protected:
         if (m_guiPanel.showGridToggled) {
             m_showGrid = !m_showGrid;
             m_guiPanel.showGrid = m_showGrid;
+        }
+        
+        // 流式传输控制
+        if (m_guiPanel.streamConnectPressed && !m_streamer.isConnected()) {
+            if (m_streamer.connect(m_guiPanel.streamHost, m_guiPanel.streamPort)) {
+                m_streamStartTime = GetTime();
+                std::cout << "[Stream] Connected to " << m_guiPanel.streamHost 
+                          << ":" << m_guiPanel.streamPort << std::endl;
+            } else {
+                std::cerr << "[Stream] Failed to connect: " << m_streamer.getLastError() << std::endl;
+            }
+        }
+        if (m_guiPanel.streamDisconnectPressed && m_streamer.isConnected()) {
+            m_streamer.disconnect();
         }
     }
     
@@ -275,6 +325,10 @@ protected:
         
         m_guiPanel.showAxes = m_robot->showAxes;
         m_guiPanel.showGrid = m_showGrid;
+        
+        // 同步流式传输状态
+        m_guiPanel.streamConnected = m_streamer.isConnected();
+        m_guiPanel.streamFramesSent = m_streamer.getFramesSent();
     }
 
     void onRender() override {
@@ -332,6 +386,7 @@ private:
     mf::GuiPanel m_guiPanel;
     std::unique_ptr<mf::RobotEntity> m_robot;
     std::unique_ptr<mf::MotionPlayer> m_motionPlayer;
+    mf::UDPStreamer m_streamer;  // UDP 流式传输到 gentle-humanoid
     bool m_robotLoaded = false;
     bool m_motionLoaded = false;
     bool m_useMotionPlayer = true;
@@ -342,6 +397,9 @@ private:
     
     float m_animTime = 0.0f;
     bool m_playAnimation = true;
+    
+    // 流式传输时间戳
+    double m_streamStartTime = 0.0;
 };
 
 int main() {

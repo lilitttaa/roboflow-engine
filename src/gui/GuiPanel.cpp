@@ -78,6 +78,8 @@ void GuiPanel::render() {
     jointChanged = false;
     showAxesToggled = false;
     showGridToggled = false;
+    streamConnectPressed = false;
+    streamDisconnectPressed = false;
     
     if (!m_visible) {
         // 显示提示
@@ -268,6 +270,43 @@ void GuiPanel::render() {
     if (gridVal != showGrid) {
         showGridToggled = true;
     }
+    y += 30;
+    
+    // 分隔线
+    DrawLine(x, y, x + width, y, Color{80, 80, 80, 255});
+    y += 10;
+    
+    // ===== 流式传输 (Gentle-Humanoid) =====
+    GuiLabel(Rectangle{(float)x, (float)y, (float)width, 20}, "Stream to Robot");
+    y += 22;
+    
+    // 连接状态
+    const char* statusText = streamConnected ? "Connected" : "Disconnected";
+    Color statusColor = streamConnected ? Color{100, 200, 100, 255} : Color{200, 100, 100, 255};
+    DrawText(TextFormat("Status: %s", statusText), x, y, 12, statusColor);
+    y += 18;
+    
+    if (streamConnected) {
+        DrawText(TextFormat("Frames sent: %llu", (unsigned long long)streamFramesSent), x, y, 12, LIGHTGRAY);
+        y += 18;
+    }
+    
+    // 连接/断开按钮
+    if (!streamConnected) {
+        if (GuiButton(Rectangle{(float)x, (float)y, (float)width, 28}, "Connect")) {
+            streamConnectPressed = true;
+        }
+    } else {
+        if (GuiButton(Rectangle{(float)x, (float)y, (float)width, 28}, "Disconnect")) {
+            streamDisconnectPressed = true;
+        }
+    }
+    y += 35;
+    
+    // 流式传输开关
+    bool streamVal = streamEnabled;
+    GuiCheckBox(Rectangle{(float)x, (float)y, 20, 20}, "Enable Streaming", &streamVal);
+    streamEnabled = streamVal;
     y += 30;
     
     // 底部提示
