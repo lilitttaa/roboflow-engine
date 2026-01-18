@@ -191,26 +191,51 @@ class Sim2sim:
     def simulate_gantry(self):
         print(f'Moving to default pose...')
         
-        # Auto mode: skip key press, just wait for stable state
+        # 站立高度（脚底到地面的高度）
+        standing_height = 0.78
+        
+        # Auto mode: 直接以站立姿势放在地面上
         if getattr(self.args, 'auto', False):
-            print('[Auto] Waiting 1 second for robot to stabilize...')
+            print('[Auto] Placing robot in standing pose on ground...')
             timer = Timer(self.low_level_dt)
-            for _ in range(int(1.0 / self.low_level_dt)):  # 1 second
-                ptargets_mujoco = self.real_to_mujoco_mapper.map_action_from_to(self.__ptargets_real)
-                self.data.qpos[:7] = [0, 0, 2, 1.0, 0.0, 0.0, 0.0]
-                self.data.qpos[7:] = ptargets_mujoco
-                mujoco.mj_forward(self.model, self.data)
+            wait_time = 2.0  # 等待 2 秒让 deploy.py 连接
+            
+            # 默认 PD 增益和目标位置
+            default_kp = np.array(self.config.kps_real) if hasattr(self.config, 'kps_real') else np.ones(len(self.config.real_joint_names)) * 100.0
+            default_kd = np.array(self.config.kds_real) if hasattr(self.config, 'kds_real') else np.ones(len(self.config.real_joint_names)) * 5.0
+            default_kp_mujoco = self.real_to_mujoco_mapper.map_action_from_to(default_kp)
+            default_kd_mujoco = self.real_to_mujoco_mapper.map_action_from_to(default_kd)
+            init_targets_mujoco = self.real_to_mujoco_mapper.map_action_from_to(
+                np.array(self.config.default_qpos_real) if hasattr(self.config, 'default_qpos_real') 
+                else np.zeros(len(self.config.real_joint_names))
+            )
+            
+            for step in range(int(wait_time / self.low_level_dt)):
+                # 设置基座位置（直接站在地面上）
+                self.data.qpos[:7] = [0, 0, standing_height, 1.0, 0.0, 0.0, 0.0]
+                self.data.qvel[:6] = 0  # 基座速度为零
+                
+                # 应用 PD 控制保持关节稳定
+                qpos_mujoco = self.data.qpos[7:]
+                qvel_mujoco = self.data.qvel[6:]
+                ctrl = default_kp_mujoco * (init_targets_mujoco - qpos_mujoco) + default_kd_mujoco * (0 - qvel_mujoco)
+                ctrl = np.clip(ctrl, self.ctrl_lower, self.ctrl_upper)
+                self.data.ctrl[:] = ctrl
+                
+                mujoco.mj_step(self.model, self.data)
+                
                 if not self._viewer_sync():
                     return
                 timer.sleep()
-            print('[Auto] Proceeding to control loop')
+            print('[Auto] Robot ready. Proceeding to control loop')
             return
         
+        # 手动模式：使用悬挂姿态
         print(f'Press "a" after the robot is in default pose to begin control loop')
         timer = Timer(self.low_level_dt)
         while True:
             ptargets_mujoco = self.real_to_mujoco_mapper.map_action_from_to(self.__ptargets_real)
-            # gantry pose
+            # gantry pose (悬挂)
             self.data.qpos[:7] = [0, 0, 2, 1.0, 0.0, 0.0, 0.0]
             self.data.qpos[7:] = ptargets_mujoco
             mujoco.mj_forward(self.model, self.data)
@@ -225,15 +250,80 @@ class Sim2sim:
 
     def simulate_control(self):
         print(f'Running control loop...')
-        self.data.qpos[2] = 0.78
-        mujoco.mj_forward(self.model, self.data)
+        
+        # Auto 模式下机器人已经在地面站立，无需下降
+        # 手动模式下从悬挂姿态开始，需要设置高度
+        if not getattr(self.args, 'auto', False):
+            # 手动模式：平滑下降
+            gantry_height = 2.0
+            control_height = 0.78
+            descent_time = 2.0
+            descent_steps = int(descent_time / self.low_level_dt)
+            
+            print(f'[Sim] Lowering robot from {gantry_height}m to {control_height}m...')
+            timer = Timer(self.low_level_dt)
+            
+            for step in range(descent_steps):
+                if not self.policy_queried:
+                    timer.sleep()
+                    continue
+                
+                t = step / descent_steps
+                t_eased = 1 - (1 - t) ** 2
+                current_height = gantry_height + (control_height - gantry_height) * t_eased
+                
+                ptargets_mujoco = self.real_to_mujoco_mapper.map_action_from_to(self.__ptargets_real)
+                kp_mujoco = self.real_to_mujoco_mapper.map_action_from_to(self.__kp_real)
+                kd_mujoco = self.real_to_mujoco_mapper.map_action_from_to(self.__kd_real)
+                
+                self.data.qpos[2] = current_height
+                
+                qpos_mujoco = self.data.qpos[7:]
+                qvel_mujoco = self.data.qvel[6:]
+                ctrl = kp_mujoco * (ptargets_mujoco - qpos_mujoco) + kd_mujoco * (0 - qvel_mujoco)
+                ctrl = np.clip(ctrl, self.ctrl_lower, self.ctrl_upper)
+                self.data.ctrl[:] = ctrl
+                
+                mujoco.mj_step(self.model, self.data)
+                
+                if not self._viewer_sync():
+                    return
+                    
+                timer.sleep()
+            
+            self.data.qpos[2] = control_height
+            mujoco.mj_forward(self.model, self.data)
+            print(f'[Sim] Robot landed.')
 
         timer = Timer(self.low_level_dt)
         time_start = time.time()
         loop_count = self.loop_count
 
+        # 默认 PD 增益（用于在 policy 准备好之前保持稳定）
+        default_kp = np.array(self.config.kps_real) if hasattr(self.config, 'kps_real') else np.ones(len(self.config.real_joint_names)) * 100.0
+        default_kd = np.array(self.config.kds_real) if hasattr(self.config, 'kds_real') else np.ones(len(self.config.real_joint_names)) * 5.0
+        default_kp_mujoco = self.real_to_mujoco_mapper.map_action_from_to(default_kp)
+        default_kd_mujoco = self.real_to_mujoco_mapper.map_action_from_to(default_kd)
+        
+        # 初始目标位置（站立姿态）
+        init_targets_mujoco = self.real_to_mujoco_mapper.map_action_from_to(
+            np.array(self.config.default_qpos_real) if hasattr(self.config, 'default_qpos_real') 
+            else np.zeros(len(self.config.real_joint_names))
+        )
+        
         while self.is_alive:
             if not self.policy_queried:
+                # Policy 还没准备好，使用默认 PD 控制保持稳定
+                qpos_mujoco = self.data.qpos[7:]
+                qvel_mujoco = self.data.qvel[6:]
+                ctrl = default_kp_mujoco * (init_targets_mujoco - qpos_mujoco) + default_kd_mujoco * (0 - qvel_mujoco)
+                ctrl = np.clip(ctrl, self.ctrl_lower, self.ctrl_upper)
+                self.data.ctrl[:] = ctrl
+                
+                mujoco.mj_step(self.model, self.data)
+                if not self._viewer_sync():
+                    break
+                    
                 timer.sleep()
                 time_start = time.time()
                 continue
