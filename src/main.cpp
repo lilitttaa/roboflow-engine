@@ -1,6 +1,8 @@
 #include "core/Application.hpp"
 #include "core/OrbitCamera.hpp"
 #include "core/ProcessManager.hpp"
+#include "core/ThirdPersonCamera.hpp"
+#include "core/CharacterController.hpp"
 #include "scene/Scene.hpp"
 #include "scene/Entity.hpp"
 #include "robot/RobotEntity.hpp"
@@ -88,6 +90,14 @@ protected:
             m_motionPlayer->bindRobot(m_robot.get());
             m_motionPlayer->setLoop(true);
             
+            // 初始化角色控制器
+            m_characterController.targetPosition = &m_robot->position;
+            // 注意：机器人的朝向是通过 rotation.y 控制的，但需要转换坐标系
+            m_characterController.camera = &m_scene.thirdPersonCamera;
+            
+            // 设置第三人称相机跟随目标
+            m_scene.thirdPersonCamera.setFollowTarget(&m_robot->position);
+            
             // 扫描可用的动作文件
             scanMotionFiles();
             
@@ -107,6 +117,43 @@ protected:
         m_guiPanel.update();
         
         if (m_robotLoaded) {
+            // 第三人称模式下使用角色控制器
+            if (m_scene.isThirdPersonMode()) {
+                m_useCharacterController = true;
+                m_characterController.enabled = true;
+                m_characterController.update(deltaTime);
+                
+                // ========== 坐标系转换 ==========
+                // 
+                // facingAngle (来自 CharacterController):
+                //   - 基于 atan2(x, z)
+                //   - 0=面向+Z, 90=面向+X, 180=面向-Z, -90=面向-X
+                //
+                // yawAngle (给 RobotEntity):
+                //   - Ry(yawAngle) 把机器人从默认朝向 +X 旋转
+                //   - 0=面向+X, 90=面向-Z, -90=面向+Z, 180=面向-X
+                //
+                // 映射公式：yawAngle = facingAngle - 90
+                //   - facingAngle=0(+Z) → yawAngle=-90 → Ry(-90°)把+X转到+Z ✓
+                //   - facingAngle=90(+X) → yawAngle=0 → 面向+X ✓
+                //   - facingAngle=180(-Z) → yawAngle=90 → Ry(90°)把+X转到-Z ✓
+                //   - facingAngle=-90(-X) → yawAngle=-180 → 面向-X ✓
+                //
+                m_robot->useYawMode = true;
+                m_robot->yawAngle = m_characterController.facingAngle - 90.0f;
+                
+                // 调试输出
+                static int mainDebugCount = 0;
+                if (mainDebugCount++ % 120 == 0) {
+                    printf("[main.cpp] facingAngle=%.1f → yawAngle=%.1f\n",
+                           m_characterController.facingAngle, m_robot->yawAngle);
+                }
+            } else {
+                m_robot->useYawMode = false;
+                m_useCharacterController = false;
+                m_characterController.enabled = false;
+            }
+            
             // 键盘快捷键在 update 中处理
             handleKeyboardInput(deltaTime);
             
@@ -326,8 +373,11 @@ protected:
     }
     
     void handleKeyboardInput(float deltaTime) {
-        // 模式切换
-        if (IsKeyPressed(KEY_M) && m_motionLoaded) {
+        // 第三人称模式下禁用与移动冲突的快捷键
+        bool isThirdPerson = m_scene.isThirdPersonMode();
+        
+        // 模式切换 (M 键在第三人称模式下仍可用)
+        if (IsKeyPressed(KEY_M) && m_motionLoaded && !isThirdPerson) {
             m_useMotionPlayer = !m_useMotionPlayer;
             m_guiPanel.useMotionPlayer = m_useMotionPlayer;
             if (!m_useMotionPlayer) {
@@ -337,7 +387,8 @@ protected:
             }
         }
         
-        if (m_motionLoaded && m_useMotionPlayer) {
+        // 在第三人称模式下，WASD/方向键被角色控制器使用，跳过动画快捷键
+        if (m_motionLoaded && m_useMotionPlayer && !isThirdPerson) {
             // 动作播放器快捷键
             if (IsKeyPressed(KEY_SPACE)) m_motionPlayer->togglePlay();
             if (IsKeyPressed(KEY_S)) m_motionPlayer->stop();
@@ -355,7 +406,7 @@ protected:
             if (IsKeyPressed(KEY_L)) m_motionPlayer->setLoop(!m_motionPlayer->isLooping());
             if (IsKeyPressed(KEY_P)) m_motionPlayer->applyRootPosition = !m_motionPlayer->applyRootPosition;
             if (IsKeyPressed(KEY_O)) m_motionPlayer->applyRootRotation = !m_motionPlayer->applyRootRotation;
-        } else {
+        } else if (!isThirdPerson) {
             // 简单动画快捷键
             if (IsKeyPressed(KEY_SPACE)) m_playAnimation = !m_playAnimation;
             if (IsKeyPressed(KEY_LEFT_BRACKET)) {
@@ -421,6 +472,25 @@ protected:
         
         m_guiPanel.showAxes = m_robot->showAxes;
         m_guiPanel.showGrid = m_showGrid;
+        
+        // 同步角色控制器状态
+        m_guiPanel.isThirdPersonMode = m_scene.isThirdPersonMode();
+        m_guiPanel.characterControllerEnabled = m_characterController.enabled;
+        m_guiPanel.controllerSpeed = m_characterController.speed;
+        m_guiPanel.controllerFacingAngle = m_characterController.facingAngle;
+        m_guiPanel.controllerIsMoving = m_characterController.isMoving;
+        m_guiPanel.controllerIsRunning = m_characterController.isRunning;
+        m_guiPanel.controllerWalkSpeed = m_characterController.walkSpeed;
+        m_guiPanel.controllerRunSpeed = m_characterController.runSpeed;
+        m_guiPanel.controllerMode = (m_characterController.controlMode == mf::ControlMode::FreeRotation) ? 0 : 1;
+        
+        // 如果 GUI 中修改了速度参数，更新到控制器
+        if (m_guiPanel.walkSpeedChanged) {
+            m_characterController.walkSpeed = m_guiPanel.controllerWalkSpeed;
+        }
+        if (m_guiPanel.runSpeedChanged) {
+            m_characterController.runSpeed = m_guiPanel.controllerRunSpeed;
+        }
         
         // 同步流式传输状态
         m_guiPanel.streamConnected = m_streamer.isConnected();
@@ -536,6 +606,7 @@ private:
     mf::Scene m_scene;
     mf::GuiPanel m_guiPanel;
     mf::ProcessManager m_processManager;  // 管理 sim2sim/deploy 进程
+    mf::CharacterController m_characterController;  // 角色控制器
     std::unique_ptr<mf::RobotEntity> m_robot;
     std::unique_ptr<mf::MotionPlayer> m_motionPlayer;
     mf::UDPStreamer m_streamer;  // UDP 流式传输到 gentle-humanoid
@@ -543,6 +614,7 @@ private:
     bool m_motionLoaded = false;
     bool m_useMotionPlayer = true;
     bool m_showGrid = true;
+    bool m_useCharacterController = false;  // 是否使用角色控制器模式
     
     std::vector<std::string> m_jointNames;
     std::vector<std::string> m_motionFiles;  // 可用的动作文件列表

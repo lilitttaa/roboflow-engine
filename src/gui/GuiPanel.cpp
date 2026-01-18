@@ -84,6 +84,8 @@ void GuiPanel::render() {
     simStartAllPressed = false;
     simStopAllPressed = false;
     motionSelectionChanged = false;
+    walkSpeedChanged = false;
+    runSpeedChanged = false;
     
     if (!m_visible) {
         // 显示提示
@@ -320,6 +322,60 @@ void GuiPanel::render() {
         showGridToggled = true;
     }
     y += 30;
+    
+    // ===== 角色控制器状态（仅在第三人称模式下显示）=====
+    if (isThirdPersonMode) {
+        // 分隔线
+        DrawLine(x, y, x + width, y, Color{80, 80, 80, 255});
+        y += 10;
+        
+        GuiLabel(Rectangle{(float)x, (float)y, (float)width, 20}, "Character Controller");
+        y += 22;
+        
+        // 控制模式显示
+        const char* modeText = (controllerMode == 0) ? "Free Rotation" : "Lock to Camera";
+        Color modeColor = (controllerMode == 0) ? Color{100, 180, 255, 255} : Color{255, 180, 100, 255};
+        DrawText(TextFormat("Mode: %s [C]", modeText), x, y, 12, modeColor);
+        y += 18;
+        
+        // 状态显示
+        Color statusColor = controllerIsMoving ? Color{100, 200, 100, 255} : Color{150, 150, 150, 255};
+        const char* moveStatus = controllerIsMoving ? (controllerIsRunning ? "Running" : "Walking") : "Idle";
+        DrawText(TextFormat("Status: %s", moveStatus), x, y, 12, statusColor);
+        y += 16;
+        
+        DrawText(TextFormat("Speed: %.2f m/s", controllerSpeed), x, y, 12, LIGHTGRAY);
+        y += 16;
+        
+        DrawText(TextFormat("Facing: %.1f deg", controllerFacingAngle), x, y, 12, LIGHTGRAY);
+        y += 22;
+        
+        // 行走速度滑块
+        GuiLabel(Rectangle{(float)x, (float)y, 80, 16}, "Walk Speed:");
+        float prevWalk = controllerWalkSpeed;
+        GuiSlider(Rectangle{(float)(x + 80), (float)y, (float)(width - 80), 16}, nullptr, 
+                  TextFormat("%.1f", controllerWalkSpeed), &controllerWalkSpeed, 0.5f, 3.0f);
+        if (controllerWalkSpeed != prevWalk) {
+            walkSpeedChanged = true;
+        }
+        y += 22;
+        
+        // 跑步速度滑块
+        GuiLabel(Rectangle{(float)x, (float)y, 80, 16}, "Run Speed:");
+        float prevRun = controllerRunSpeed;
+        GuiSlider(Rectangle{(float)(x + 80), (float)y, (float)(width - 80), 16}, nullptr, 
+                  TextFormat("%.1f", controllerRunSpeed), &controllerRunSpeed, 1.0f, 5.0f);
+        if (controllerRunSpeed != prevRun) {
+            runSpeedChanged = true;
+        }
+        y += 26;
+        
+        // 提示
+        DrawText("WASD: Move | Shift: Run | C: Mode", x, y, 11, GRAY);
+        y += 14;
+        DrawText("Alt: Unlock Mouse | Tab: Camera", x, y, 11, GRAY);
+        y += 20;
+    }
     
     // 分隔线
     DrawLine(x, y, x + width, y, Color{80, 80, 80, 255});

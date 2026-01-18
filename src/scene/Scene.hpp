@@ -3,6 +3,7 @@
 #include "Entity.hpp"
 #include "../core/OrbitCamera.hpp"
 #include "../core/FlyCamera.hpp"
+#include "../core/ThirdPersonCamera.hpp"
 #include <memory>
 
 namespace mf {
@@ -11,8 +12,9 @@ namespace mf {
  * CameraMode - 相机模式
  */
 enum class CameraMode {
-    Orbit,  // 轨道相机（默认）
-    Fly     // 飞行相机（UE4风格）
+    Orbit,       // 轨道相机（默认）
+    Fly,         // 飞行相机（UE4风格）
+    ThirdPerson  // 第三人称跟随相机
 };
 
 /**
@@ -23,6 +25,7 @@ class Scene {
 public:
     OrbitCamera orbitCamera;
     FlyCamera flyCamera;
+    ThirdPersonCamera thirdPersonCamera;
     CameraMode cameraMode = CameraMode::Orbit;
     
     Color clearColor = { 30, 30, 35, 255 };
@@ -63,10 +66,16 @@ public:
 
     // 切换到下一个相机模式
     void toggleCameraMode() {
-        if (cameraMode == CameraMode::Orbit) {
-            setCameraMode(CameraMode::Fly);
-        } else {
-            setCameraMode(CameraMode::Orbit);
+        switch (cameraMode) {
+            case CameraMode::Orbit:
+                setCameraMode(CameraMode::Fly);
+                break;
+            case CameraMode::Fly:
+                setCameraMode(CameraMode::ThirdPerson);
+                break;
+            case CameraMode::ThirdPerson:
+                setCameraMode(CameraMode::Orbit);
+                break;
         }
     }
 
@@ -75,6 +84,7 @@ public:
         switch (cameraMode) {
             case CameraMode::Orbit: return "Orbit Camera";
             case CameraMode::Fly: return "Fly Camera (UE4)";
+            case CameraMode::ThirdPerson: return "Third Person Camera";
         }
         return "Unknown";
     }
@@ -93,6 +103,9 @@ public:
                 break;
             case CameraMode::Fly:
                 flyCamera.update(deltaTime);
+                break;
+            case CameraMode::ThirdPerson:
+                thirdPersonCamera.update(deltaTime);
                 break;
         }
         
@@ -141,6 +154,16 @@ public:
         return cameraMode == CameraMode::Fly && flyCamera.isActive();
     }
 
+    // 检查是否为第三人称模式
+    bool isThirdPersonMode() const {
+        return cameraMode == CameraMode::ThirdPerson;
+    }
+
+    // 获取第三人称相机引用
+    ThirdPersonCamera& getThirdPersonCamera() {
+        return thirdPersonCamera;
+    }
+
 private:
     std::unique_ptr<Entity> m_root;
 
@@ -151,6 +174,9 @@ private:
                 break;
             case CameraMode::Fly:
                 flyCamera.begin3D();
+                break;
+            case CameraMode::ThirdPerson:
+                thirdPersonCamera.begin3D();
                 break;
         }
     }
@@ -163,19 +189,39 @@ private:
             case CameraMode::Fly:
                 flyCamera.end3D();
                 break;
+            case CameraMode::ThirdPerson:
+                thirdPersonCamera.end3D();
+                break;
         }
     }
 
     // 同步相机位置（切换时保持视角连续）
     void syncCameras() {
-        if (cameraMode == CameraMode::Fly) {
-            // 从轨道相机位置设置飞行相机
-            flyCamera.position = orbitCamera.getPosition();
-            flyCamera.lookAt(flyCamera.position, orbitCamera.target);
-        } else {
-            // 从飞行相机位置设置轨道相机
-            orbitCamera.target = flyCamera.getTarget();
-            orbitCamera.distance = 5.0f;
+        // 只在窗口就绪后才操作鼠标
+        bool windowReady = IsWindowReady();
+        
+        switch (cameraMode) {
+            case CameraMode::Fly:
+                // 从轨道相机位置设置飞行相机
+                flyCamera.position = orbitCamera.getPosition();
+                flyCamera.lookAt(flyCamera.position, orbitCamera.target);
+                break;
+            case CameraMode::ThirdPerson:
+                // 进入第三人称模式时锁定鼠标
+                if (windowReady && thirdPersonCamera.mouseLocked) {
+                    DisableCursor();
+                }
+                break;
+            case CameraMode::Orbit:
+            default:
+                // 从飞行相机位置设置轨道相机
+                orbitCamera.target = flyCamera.getTarget();
+                orbitCamera.distance = 5.0f;
+                // 确保鼠标可用
+                if (windowReady) {
+                    EnableCursor();
+                }
+                break;
         }
     }
 };

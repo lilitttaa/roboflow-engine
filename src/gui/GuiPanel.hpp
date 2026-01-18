@@ -115,6 +115,19 @@ public:
     bool sim2simRunning = false;         // sim2sim 运行状态（由外部设置）
     bool deployRunning = false;          // deploy 运行状态（由外部设置）
     bool autoConnectStream = true;       // 启动后自动连接流式传输
+    
+    // ===== 角色控制器状态（第三人称模式）=====
+    bool isThirdPersonMode = false;      // 是否处于第三人称模式
+    bool characterControllerEnabled = false;  // 角色控制器是否启用
+    float controllerSpeed = 0.0f;        // 当前移动速度
+    float controllerFacingAngle = 0.0f;  // 当前朝向角度
+    bool controllerIsMoving = false;     // 是否正在移动
+    bool controllerIsRunning = false;    // 是否在跑步
+    float controllerWalkSpeed = 1.2f;    // 行走速度
+    float controllerRunSpeed = 2.8f;     // 跑步速度
+    bool walkSpeedChanged = false;       // 行走速度改变事件
+    bool runSpeedChanged = false;        // 跑步速度改变事件
+    int controllerMode = 0;              // 0=自由朝向, 1=锁定相机
 
 private:
     bool m_visible = true;

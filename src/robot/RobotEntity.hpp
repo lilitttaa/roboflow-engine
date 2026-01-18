@@ -65,8 +65,12 @@ public:
     
     // 世界变换
     Vector3 position = {0, 0, 0};
-    Vector3 rotation = {0, 0, 0};  // 欧拉角（度）
+    Vector3 rotation = {0, 0, 0};  // 欧拉角（度）- 仅用于非控制器模式
     float scale = 1.0f;
+    
+    // 第三人称控制器专用
+    float yawAngle = 0.0f;  // 水平朝向角度（度）- 绕世界 Y 轴
+    bool useYawMode = false;  // 是否使用 yaw 模式（坐标系转换 + yaw）
     
     // 是否显示坐标轴
     bool showAxes = false;
