@@ -99,7 +99,7 @@ public:
         m_root->update(deltaTime);
     }
 
-    // 渲染场景
+    // 渲染场景（自动管理 3D 模式）
     void render() {
         ClearBackground(clearColor);
         
@@ -122,6 +122,17 @@ public:
             // 渲染场景图
             m_root->render();
         }
+        endCamera3D();
+    }
+
+    // 开始 3D 渲染模式（手动控制）
+    void begin3D() {
+        ClearBackground(clearColor);
+        beginCamera3D();
+    }
+
+    // 结束 3D 渲染模式（手动控制）
+    void end3D() {
         endCamera3D();
     }
 
