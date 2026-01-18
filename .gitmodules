@@ -1,0 +1,6 @@
+[submodule "external/GMR"]
+	path = external/GMR
+	url = https://github.com/Axellwppr/GMR.git
+[submodule "external/lafan"]
+	path = external/lafan
+	url = https://github.com/ubisoft/ubisoft-laforge-animation-dataset.git
