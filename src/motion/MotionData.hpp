@@ -27,11 +27,25 @@ public:
     ~MotionData() = default;
     
     /**
-     * 从 .motion 文件加载
+     * 从文件加载（自动检测格式：.motion 或 .npz）
      * @param path 文件路径
      * @return 是否成功
      */
     bool loadFromFile(const std::string& path);
+    
+    /**
+     * 从 .npz 文件加载（NumPy 压缩格式）
+     * @param path 文件路径
+     * @return 是否成功
+     */
+    bool loadFromNpz(const std::string& path);
+    
+    /**
+     * 从 .motion 文件加载（自定义二进制格式）
+     * @param path 文件路径
+     * @return 是否成功
+     */
+    bool loadFromMotion(const std::string& path);
     
     /**
      * 获取帧数

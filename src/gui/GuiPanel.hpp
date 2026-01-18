@@ -49,6 +49,11 @@ public:
      */
     void setVisible(bool visible) { m_visible = visible; }
     
+    // ===== 动作文件选择 =====
+    std::vector<std::string> motionFiles;      // 可用的动作文件列表
+    int selectedMotionIndex = 0;               // 当前选中的动作索引
+    bool motionSelectionChanged = false;       // 动作选择改变事件
+    
     // ===== 动作播放器控制 =====
     bool playPressed = false;
     bool stopPressed = false;
@@ -62,8 +67,10 @@ public:
     // 动作播放器状态（由外部设置）
     bool isPlaying = false;
     bool isLooping = true;
-    bool applyRootPos = true;
-    bool applyRootRot = true;
+    bool applyRootPos = false;     // 默认关闭，避免瞬移
+    bool applyRootRot = false;     // 默认关闭
+    bool useRelativePos = true;    // 使用相对位置模式
+    bool relPosToggled = false;    // 相对位置切换事件
     float currentTime = 0.0f;
     float duration = 1.0f;
     int currentFrame = 0;
@@ -113,6 +120,7 @@ private:
     bool m_visible = true;
     Rectangle m_panelRect = { 0, 0, 280, 600 };
     Vector2 m_panelScroll = { 0, 0 };
+    bool m_motionDropdownActive = false;  // 动作下拉框是否展开
     
     // GUI 样式
     void setupStyle();

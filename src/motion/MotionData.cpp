@@ -1,4 +1,5 @@
 #include "MotionData.hpp"
+#include "NpzReader.hpp"
 #include <fstream>
 #include <iostream>
 #include <cstring>
@@ -7,6 +8,105 @@
 namespace mf {
 
 bool MotionData::loadFromFile(const std::string& path) {
+    // 自动检测格式
+    if (path.size() >= 4 && path.substr(path.size() - 4) == ".npz") {
+        return loadFromNpz(path);
+    }
+    return loadFromMotion(path);
+}
+
+bool MotionData::loadFromNpz(const std::string& path) {
+    NpzReader reader;
+    if (!reader.load(path)) {
+        std::cerr << "MotionData: Failed to open NPZ file: " << path << std::endl;
+        return false;
+    }
+    
+    // 读取 FPS
+    if (reader.hasArray("fps")) {
+        auto fpsData = reader.getArray("fps").asFloat();
+        if (!fpsData.empty()) {
+            m_fps = fpsData[0];
+        }
+    }
+    
+    // 读取关节名称
+    if (reader.hasArray("joint_names")) {
+        m_jointNames = reader.getArray("joint_names").asStringArray();
+    }
+    
+    // 读取数据数组
+    if (!reader.hasArray("root_pos") || !reader.hasArray("root_rot") || !reader.hasArray("dof_pos")) {
+        std::cerr << "MotionData: Missing required arrays in NPZ file" << std::endl;
+        return false;
+    }
+    
+    const auto& rootPosArr = reader.getArray("root_pos");
+    const auto& rootRotArr = reader.getArray("root_rot");
+    const auto& dofPosArr = reader.getArray("dof_pos");
+    
+    auto rootPosData = rootPosArr.asFloat();
+    auto rootRotData = rootRotArr.asFloat();
+    auto dofPosData = dofPosArr.asFloat();
+    
+    size_t numFrames = rootPosArr.shape[0];
+    size_t numJoints = dofPosArr.shape.size() > 1 ? dofPosArr.shape[1] : 0;
+    
+    std::cout << "MotionData: Loading NPZ " << path << std::endl;
+    std::cout << "  FPS: " << m_fps << std::endl;
+    std::cout << "  Frames: " << numFrames << std::endl;
+    std::cout << "  Joints: " << numJoints << std::endl;
+    
+    // 构建帧数据
+    m_frames.resize(numFrames);
+    for (size_t i = 0; i < numFrames; ++i) {
+        MotionFrame& frame = m_frames[i];
+        
+        // root_pos (x, y, z)
+        frame.rootPos.x = rootPosData[i * 3 + 0];
+        frame.rootPos.y = rootPosData[i * 3 + 1];
+        frame.rootPos.z = rootPosData[i * 3 + 2];
+        
+        // root_rot (xyzw -> raylib uses xyzw internally)
+        float qx = rootRotData[i * 4 + 0];
+        float qy = rootRotData[i * 4 + 1];
+        float qz = rootRotData[i * 4 + 2];
+        float qw = rootRotData[i * 4 + 3];
+        frame.rootQuat = { qx, qy, qz, qw };
+        
+        // joint positions
+        frame.jointPos.resize(numJoints);
+        for (size_t j = 0; j < numJoints; ++j) {
+            frame.jointPos[j] = dofPosData[i * numJoints + j];
+        }
+    }
+    
+    // 如果没有关节名称，使用默认的 G1 关节名称
+    if (m_jointNames.empty() && numJoints == 29) {
+        m_jointNames = {
+            "left_hip_pitch_joint", "left_hip_roll_joint", "left_hip_yaw_joint",
+            "left_knee_joint", "left_ankle_pitch_joint", "left_ankle_roll_joint",
+            "right_hip_pitch_joint", "right_hip_roll_joint", "right_hip_yaw_joint",
+            "right_knee_joint", "right_ankle_pitch_joint", "right_ankle_roll_joint",
+            "waist_yaw_joint", "waist_roll_joint", "waist_pitch_joint",
+            "left_shoulder_pitch_joint", "left_shoulder_roll_joint", "left_shoulder_yaw_joint",
+            "left_elbow_joint", "left_wrist_roll_joint", "left_wrist_pitch_joint", "left_wrist_yaw_joint",
+            "right_shoulder_pitch_joint", "right_shoulder_roll_joint", "right_shoulder_yaw_joint",
+            "right_elbow_joint", "right_wrist_roll_joint", "right_wrist_pitch_joint", "right_wrist_yaw_joint",
+        };
+    }
+    
+    std::cout << "  Joint names: ";
+    for (size_t i = 0; i < std::min(size_t(3), m_jointNames.size()); ++i) {
+        std::cout << m_jointNames[i] << " ";
+    }
+    if (m_jointNames.size() > 3) std::cout << "...";
+    std::cout << std::endl;
+    
+    return true;
+}
+
+bool MotionData::loadFromMotion(const std::string& path) {
     std::ifstream file(path, std::ios::binary);
     if (!file.is_open()) {
         std::cerr << "MotionData: Failed to open file: " << path << std::endl;

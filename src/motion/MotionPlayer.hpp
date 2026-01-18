@@ -138,15 +138,22 @@ public:
     /**
      * 是否应用根位置
      */
-    bool applyRootPosition = true;
+    bool applyRootPosition = false;  // 默认关闭，避免瞬移
     
     /**
      * 是否应用根旋转
      */
-    bool applyRootRotation = true;
+    bool applyRootRotation = false;  // 默认关闭
     
     /**
-     * 根位置偏移
+     * 使用相对位置模式
+     * true: 位置相对于动作开始时的位置
+     * false: 使用动作数据中的绝对位置
+     */
+    bool useRelativePosition = true;
+    
+    /**
+     * 根位置偏移（用于手动调整）
      */
     Vector3 rootPositionOffset = {0, 0, 0};
 
@@ -163,8 +170,18 @@ private:
     bool m_playing = false;
     bool m_loop = true;
     
+    // 相对位置模式的初始值
+    Vector3 m_initialRobotPos = {0, 0, 0};     // 播放开始时机器人的位置
+    Vector3 m_initialMotionPos = {0, 0, 0};    // 动作第一帧的根位置
+    Quaternion m_initialRobotRot = {0, 0, 0, 1};  // 播放开始时机器人的旋转
+    Quaternion m_initialMotionRot = {0, 0, 0, 1}; // 动作第一帧的根旋转
+    bool m_initialValuesSet = false;
+    
     // 将当前帧应用到机器人
     void applyFrame(const MotionFrame& frame);
+    
+    // 设置相对位置模式的初始值
+    void captureInitialValues();
 };
 
 } // namespace mf

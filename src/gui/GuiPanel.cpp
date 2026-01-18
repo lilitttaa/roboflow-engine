@@ -71,6 +71,7 @@ void GuiPanel::render() {
     loopToggled = false;
     rootPosToggled = false;
     rootRotToggled = false;
+    relPosToggled = false;
     seekChanged = false;
     modeToggled = false;
     animationToggled = false;
@@ -82,6 +83,7 @@ void GuiPanel::render() {
     streamDisconnectPressed = false;
     simStartAllPressed = false;
     simStopAllPressed = false;
+    motionSelectionChanged = false;
     
     if (!m_visible) {
         // 显示提示
@@ -129,6 +131,40 @@ void GuiPanel::render() {
         // ===== 动作播放器控制 =====
         GuiLabel(Rectangle{(float)x, (float)y, (float)width, 20}, "Motion Playback");
         y += 22;
+        
+        // 动作文件选择下拉框
+        if (!motionFiles.empty()) {
+            GuiLabel(Rectangle{(float)x, (float)y, 60, 20}, "Motion:");
+            
+            // 构建下拉框文本（用分号分隔）
+            std::string dropdownText;
+            for (size_t i = 0; i < motionFiles.size(); i++) {
+                if (i > 0) dropdownText += ";";
+                // 只显示文件名，不显示路径
+                std::string name = motionFiles[i];
+                size_t lastSlash = name.find_last_of("/\\");
+                if (lastSlash != std::string::npos) {
+                    name = name.substr(lastSlash + 1);
+                }
+                // 去掉 .motion 后缀
+                size_t dotPos = name.find(".motion");
+                if (dotPos != std::string::npos) {
+                    name = name.substr(0, dotPos);
+                }
+                dropdownText += name;
+            }
+            
+            int newIndex = selectedMotionIndex;
+            if (GuiDropdownBox(Rectangle{(float)(x + 60), (float)y, (float)(width - 60), 24}, 
+                              dropdownText.c_str(), &newIndex, m_motionDropdownActive)) {
+                m_motionDropdownActive = !m_motionDropdownActive;
+            }
+            if (!m_motionDropdownActive && newIndex != selectedMotionIndex) {
+                selectedMotionIndex = newIndex;
+                motionSelectionChanged = true;
+            }
+            y += 32;
+        }
         
         // 播放状态
         DrawText(TextFormat("Frame: %d / %d", currentFrame, totalFrames), x, y, 12, LIGHTGRAY);
@@ -183,7 +219,18 @@ void GuiPanel::render() {
         if (rootRotVal != applyRootRot) {
             rootRotToggled = true;
         }
-        y += 30;
+        y += 26;
+        
+        // 只有在启用根位置时才显示相对位置选项
+        if (applyRootPos) {
+            bool relPosVal = useRelativePos;
+            GuiCheckBox(Rectangle{(float)x, (float)y, 20, 20}, "  Use Relative Position", &relPosVal);
+            if (relPosVal != useRelativePos) {
+                relPosToggled = true;
+            }
+            y += 26;
+        }
+        y += 4;
         
     } else {
         // ===== 简单动画控制 =====

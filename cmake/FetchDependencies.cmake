@@ -2,11 +2,11 @@
 include(FetchContent)
 
 # ============================================================================
-# raylib - 渲染框架 (使用 gitee 镜像加速)
+# raylib - 渲染框架
 # ============================================================================
 FetchContent_Declare(
     raylib
-    GIT_REPOSITORY https://gitee.com/mirrors/raylib.git
+    GIT_REPOSITORY https://github.com/raysan5/raylib.git
     GIT_TAG 5.0
     GIT_SHALLOW TRUE
     GIT_PROGRESS TRUE
@@ -27,7 +27,7 @@ find_package(assimp REQUIRED)
 message(STATUS "Assimp found: ${assimp_VERSION}")
 
 # ============================================================================
-# tinyxml2 - 使用 pkg-config 查找
+# tinyxml2 - 使用系统安装的库 (使用 pkg-config)
 # 安装: sudo apt install libtinyxml2-dev
 # ============================================================================
 find_package(PkgConfig REQUIRED)

@@ -174,9 +174,23 @@ class Sim2sim:
 
     def wait_for_high_cmd(self):
         print(f'Waiting for high level controller...')
-        while self.low_cmd is None:
-            continue
-        print(f'Connected to high level')
+        
+        # Auto 模式下设置超时
+        if getattr(self.args, 'auto', False):
+            timeout = 15.0  # 15 秒超时
+            start_time = time.time()
+            while self.low_cmd is None:
+                if time.time() - start_time > timeout:
+                    print('[Auto] Timeout waiting for high level controller, continuing anyway...')
+                    break
+                time.sleep(0.01)  # 避免 busy wait
+        else:
+            # 手动模式：无限等待
+            while self.low_cmd is None:
+                time.sleep(0.01)
+        
+        if self.low_cmd is not None:
+            print(f'Connected to high level')
         
         # Auto mode: skip key press
         if getattr(self.args, 'auto', False):

@@ -65,6 +65,11 @@ void MotionPlayer::update(float deltaTime) {
         return;
     }
     
+    // 首次播放时捕获初始值
+    if (!m_initialValuesSet) {
+        captureInitialValues();
+    }
+    
     // 更新时间
     m_currentTime += deltaTime * m_playbackSpeed;
     
@@ -89,13 +94,60 @@ void MotionPlayer::update(float deltaTime) {
     applyFrame(frame);
 }
 
+void MotionPlayer::captureInitialValues() {
+    if (!m_robot || !m_motion || !m_motion->isValid()) return;
+    
+    // 保存机器人当前位置
+    m_initialRobotPos = m_robot->position;
+    
+    // 保存动作第一帧的根位置（转换到 Y-up 坐标系）
+    const MotionFrame& firstFrame = m_motion->getFrame(0);
+    m_initialMotionPos = {
+        firstFrame.rootPos.x,
+        firstFrame.rootPos.z,   // Z -> Y
+        -firstFrame.rootPos.y   // Y -> -Z
+    };
+    
+    m_initialMotionRot = firstFrame.rootQuat;
+    
+    m_initialValuesSet = true;
+    std::cout << "[MotionPlayer] Captured initial position: robot(" 
+              << m_initialRobotPos.x << ", " << m_initialRobotPos.y << ", " << m_initialRobotPos.z
+              << ") motion(" << m_initialMotionPos.x << ", " << m_initialMotionPos.y << ", " << m_initialMotionPos.z << ")"
+              << std::endl;
+}
+
 void MotionPlayer::stop() {
     m_currentTime = 0.0f;
     m_playing = false;
+    m_initialValuesSet = false;  // 重置初始值，下次播放时重新捕获
     
-    // 应用第一帧
-    if (m_motion && m_motion->isValid()) {
-        applyFrame(m_motion->getFrame(0));
+    // 应用第一帧（但不改变位置）
+    if (m_motion && m_motion->isValid() && m_robot) {
+        // 保存当前位置
+        Vector3 savedPos = m_robot->position;
+        Vector3 savedRot = m_robot->rotation;
+        
+        // 只应用关节角度
+        const MotionFrame& frame = m_motion->getFrame(0);
+        const auto& jointNames = m_motion->getJointNames();
+        for (size_t i = 0; i < jointNames.size() && i < frame.jointPos.size(); ++i) {
+            const std::string& motionJointName = jointNames[i];
+            std::string robotJointName = motionJointName;
+            auto it = m_jointMapping.find(motionJointName);
+            if (it != m_jointMapping.end()) {
+                robotJointName = it->second;
+            }
+            m_robot->setJointPosition(robotJointName, frame.jointPos[i]);
+        }
+        
+        // 恢复位置（如果不应用根位置）
+        if (!applyRootPosition) {
+            m_robot->position = savedPos;
+        }
+        if (!applyRootRotation) {
+            m_robot->rotation = savedRot;
+        }
     }
 }
 
@@ -135,13 +187,33 @@ void MotionPlayer::applyFrame(const MotionFrame& frame) {
     
     // 应用根位置（需要坐标转换：动作数据是 Z-up，raylib 是 Y-up）
     if (applyRootPosition) {
-        // Z-up to Y-up: (x, y, z) -> (x, z, -y)
-        // 但由于机器人已经有 rotation = {-90, 0, 0}，这里直接设置即可
-        m_robot->position = {
-            frame.rootPos.x + rootPositionOffset.x,
-            frame.rootPos.z + rootPositionOffset.y,  // Z -> Y
-            -frame.rootPos.y + rootPositionOffset.z  // Y -> -Z
+        // 当前帧的根位置（转换到 Y-up）
+        Vector3 currentMotionPos = {
+            frame.rootPos.x,
+            frame.rootPos.z,   // Z -> Y
+            -frame.rootPos.y   // Y -> -Z
         };
+        
+        if (useRelativePosition && m_initialValuesSet) {
+            // 相对模式：计算相对于第一帧的位移，然后应用到初始机器人位置
+            Vector3 delta = {
+                currentMotionPos.x - m_initialMotionPos.x,
+                currentMotionPos.y - m_initialMotionPos.y,
+                currentMotionPos.z - m_initialMotionPos.z
+            };
+            m_robot->position = {
+                m_initialRobotPos.x + delta.x + rootPositionOffset.x,
+                m_initialRobotPos.y + delta.y + rootPositionOffset.y,
+                m_initialRobotPos.z + delta.z + rootPositionOffset.z
+            };
+        } else {
+            // 绝对模式：直接使用动作数据中的位置
+            m_robot->position = {
+                currentMotionPos.x + rootPositionOffset.x,
+                currentMotionPos.y + rootPositionOffset.y,
+                currentMotionPos.z + rootPositionOffset.z
+            };
+        }
     }
     
     // 应用根旋转

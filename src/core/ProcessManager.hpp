@@ -43,7 +43,7 @@ public:
     }
     
     /**
-     * 启动进程
+     * 启动进程（使用 double fork 避免僵尸进程）
      */
     bool start() {
         if (m_state == ProcessState::Running) {
@@ -53,39 +53,87 @@ public:
         
         m_state = ProcessState::Starting;
         
-        pid_t pid = fork();
-        if (pid < 0) {
-            std::cerr << "[ProcessManager] Failed to fork for " << m_name << std::endl;
+        // 创建管道用于获取孙进程的 PID
+        int pipefd[2];
+        if (pipe(pipefd) < 0) {
+            std::cerr << "[ProcessManager] Failed to create pipe" << std::endl;
             m_state = ProcessState::Error;
             return false;
         }
         
-        if (pid == 0) {
-            // Child process
-            if (!m_workDir.empty()) {
-                if (chdir(m_workDir.c_str()) != 0) {
-                    std::cerr << "[ProcessManager] Failed to change directory to " << m_workDir << std::endl;
-                    _exit(1);
-                }
-            }
-            
-            // Prepare arguments
-            std::vector<char*> args;
-            for (const auto& arg : m_command) {
-                args.push_back(const_cast<char*>(arg.c_str()));
-            }
-            args.push_back(nullptr);
-            
-            // Execute
-            execvp(args[0], args.data());
-            
-            // If exec fails
-            std::cerr << "[ProcessManager] Failed to execute " << m_command[0] << std::endl;
-            _exit(1);
+        pid_t pid = fork();
+        if (pid < 0) {
+            std::cerr << "[ProcessManager] Failed to fork for " << m_name << std::endl;
+            m_state = ProcessState::Error;
+            close(pipefd[0]);
+            close(pipefd[1]);
+            return false;
         }
         
-        // Parent process
-        m_pid = pid;
+        if (pid == 0) {
+            // 第一个子进程 - 立即 fork 然后退出
+            close(pipefd[0]);  // 关闭读端
+            
+            pid_t grandchild = fork();
+            if (grandchild < 0) {
+                write(pipefd[1], &grandchild, sizeof(grandchild));
+                close(pipefd[1]);
+                _exit(1);
+            }
+            
+            if (grandchild == 0) {
+                // 孙进程 - 实际执行任务
+                close(pipefd[1]);
+                
+                // 创建新会话，脱离控制终端
+                setsid();
+                
+                if (!m_workDir.empty()) {
+                    if (chdir(m_workDir.c_str()) != 0) {
+                        std::cerr << "[ProcessManager] Failed to change directory to " << m_workDir << std::endl;
+                        _exit(1);
+                    }
+                }
+                
+                // Prepare arguments
+                std::vector<char*> args;
+                for (const auto& arg : m_command) {
+                    args.push_back(const_cast<char*>(arg.c_str()));
+                }
+                args.push_back(nullptr);
+                
+                // Execute
+                execvp(args[0], args.data());
+                
+                // If exec fails
+                std::cerr << "[ProcessManager] Failed to execute " << m_command[0] << std::endl;
+                _exit(1);
+            }
+            
+            // 第一个子进程：写入孙进程 PID 然后退出
+            write(pipefd[1], &grandchild, sizeof(grandchild));
+            close(pipefd[1]);
+            _exit(0);
+        }
+        
+        // 父进程
+        close(pipefd[1]);  // 关闭写端
+        
+        // 立即等待第一个子进程退出（不会阻塞太久）
+        waitpid(pid, nullptr, 0);
+        
+        // 读取孙进程的 PID
+        pid_t grandchild_pid;
+        read(pipefd[0], &grandchild_pid, sizeof(grandchild_pid));
+        close(pipefd[0]);
+        
+        if (grandchild_pid <= 0) {
+            std::cerr << "[ProcessManager] Failed to start grandchild process" << std::endl;
+            m_state = ProcessState::Error;
+            return false;
+        }
+        
+        m_pid = grandchild_pid;
         m_state = ProcessState::Running;
         std::cout << "[ProcessManager] Started " << m_name << " (PID: " << m_pid << ")" << std::endl;
         return true;
@@ -190,6 +238,36 @@ public:
     }
     
     /**
+     * 清理残留的僵尸进程和停止的进程
+     */
+    void cleanupZombies() {
+        std::cout << "[ProcessManager] Cleaning up zombie/stopped processes..." << std::endl;
+        
+        // 使用 pkill -9 强制清理可能残留的进程
+        system("pkill -9 -f 'sim2sim.py' 2>/dev/null");
+        system("pkill -9 -f 'deploy.py' 2>/dev/null");
+        system("pkill -9 -f 'multiprocessing.resource_tracker' 2>/dev/null");
+        
+        // 等待子进程被回收
+        int status;
+        while (waitpid(-1, &status, WNOHANG) > 0) {
+            // 回收僵尸进程
+        }
+        
+        // 重置内部状态
+        if (m_sim2sim) {
+            m_sim2sim.reset();
+        }
+        if (m_deploy) {
+            m_deploy.reset();
+        }
+        m_startingAll = false;
+        
+        std::this_thread::sleep_for(std::chrono::milliseconds(500));
+        std::cout << "[ProcessManager] Cleanup done" << std::endl;
+    }
+    
+    /**
      * 启动 sim2sim.py
      */
     bool startSim2Sim(bool autoMode = true) {
@@ -246,20 +324,37 @@ public:
     }
     
     /**
-     * 启动全部（先 sim2sim，再 deploy）
+     * 启动全部（异步启动，不阻塞主线程）
      */
     bool startAll(bool autoMode = true) {
+        if (m_startingAll) {
+            std::cerr << "[ProcessManager] Already starting..." << std::endl;
+            return false;
+        }
+        
+        // 先清理可能残留的僵尸进程
+        cleanupZombies();
+        
         if (!startSim2Sim(autoMode)) {
             return false;
         }
         
-        // Wait for sim2sim to initialize
-        std::this_thread::sleep_for(std::chrono::milliseconds(1500));
-        
-        if (!startDeploy(autoMode)) {
-            stopSim2Sim();
-            return false;
-        }
+        // 异步启动 deploy（在后台线程中等待后启动）
+        m_startingAll = true;
+        m_deployAutoMode = autoMode;
+        m_deployStartThread = std::thread([this]() {
+            // 等待 sim2sim 初始化
+            std::this_thread::sleep_for(std::chrono::milliseconds(2000));
+            
+            if (m_startingAll) {
+                if (!startDeploy(m_deployAutoMode)) {
+                    std::cerr << "[ProcessManager] Failed to start deploy" << std::endl;
+                    stopSim2Sim();
+                }
+            }
+            m_startingAll = false;
+        });
+        m_deployStartThread.detach();
         
         return true;
     }
@@ -268,8 +363,18 @@ public:
      * 停止全部
      */
     void stopAll() {
+        m_startingAll = false;  // 停止异步启动
         stopDeploy();
         stopSim2Sim();
+        
+        // 确保子进程被清理
+        system("pkill -9 -f 'sim2sim.py' 2>/dev/null");
+        system("pkill -9 -f 'deploy.py' 2>/dev/null");
+        system("pkill -9 -f 'multiprocessing.resource_tracker' 2>/dev/null");
+        
+        // 回收僵尸进程
+        int status;
+        while (waitpid(-1, &status, WNOHANG) > 0) {}
     }
     
     /**
@@ -316,6 +421,11 @@ private:
     std::string m_ghPath;
     std::unique_ptr<ManagedProcess> m_sim2sim;
     std::unique_ptr<ManagedProcess> m_deploy;
+    
+    // 异步启动相关
+    std::atomic<bool> m_startingAll{false};
+    bool m_deployAutoMode = true;
+    std::thread m_deployStartThread;
 };
 
 } // namespace mf

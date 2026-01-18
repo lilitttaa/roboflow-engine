@@ -13,6 +13,7 @@
 #include <cmath>
 #include <iostream>
 #include <array>
+#include <algorithm>
 #include <filesystem>
 
 /**
@@ -87,12 +88,14 @@ protected:
             m_motionPlayer->bindRobot(m_robot.get());
             m_motionPlayer->setLoop(true);
             
-            // 尝试加载默认动作文件
-            if (m_motionPlayer->loadMotion("assets/motions/walk.motion")) {
-                std::cout << "Loaded motion: " << m_motionPlayer->getNumFrames() << " frames" << std::endl;
-                m_motionLoaded = true;
+            // 扫描可用的动作文件
+            scanMotionFiles();
+            
+            // 加载第一个动作文件（如果有）
+            if (!m_motionFiles.empty()) {
+                loadMotionFile(m_motionFiles[0]);
             } else {
-                std::cout << "No motion file found. Use simple animation." << std::endl;
+                std::cout << "No motion files found. Use simple animation." << std::endl;
             }
         } else {
             std::cerr << "Failed to load robot URDF!" << std::endl;
@@ -213,6 +216,14 @@ protected:
             }
         }
         
+        // 动作文件选择
+        if (m_guiPanel.motionSelectionChanged && !m_motionFiles.empty()) {
+            int idx = m_guiPanel.selectedMotionIndex;
+            if (idx >= 0 && idx < (int)m_motionFiles.size()) {
+                loadMotionFile(m_motionFiles[idx]);
+            }
+        }
+        
         if (m_motionLoaded && m_useMotionPlayer) {
             // 动作播放器控制
             if (m_guiPanel.playPressed) {
@@ -229,6 +240,9 @@ protected:
             }
             if (m_guiPanel.rootRotToggled) {
                 m_motionPlayer->applyRootRotation = !m_motionPlayer->applyRootRotation;
+            }
+            if (m_guiPanel.relPosToggled) {
+                m_motionPlayer->useRelativePosition = !m_motionPlayer->useRelativePosition;
             }
             
             // 播放速度
@@ -380,6 +394,7 @@ protected:
             m_guiPanel.isLooping = m_motionPlayer->isLooping();
             m_guiPanel.applyRootPos = m_motionPlayer->applyRootPosition;
             m_guiPanel.applyRootRot = m_motionPlayer->applyRootRotation;
+            m_guiPanel.useRelativePos = m_motionPlayer->useRelativePosition;
             m_guiPanel.currentTime = m_motionPlayer->getCurrentTime();
             m_guiPanel.duration = m_motionPlayer->getDuration();
             m_guiPanel.currentFrame = m_motionPlayer->getCurrentFrame();
@@ -466,6 +481,57 @@ protected:
         }
     }
 
+    // 扫描 assets/motions 目录下的动画文件 (.motion 和 .npz)
+    void scanMotionFiles() {
+        m_motionFiles.clear();
+        std::filesystem::path motionDir = "assets/motions";
+        
+        if (std::filesystem::exists(motionDir)) {
+            for (const auto& entry : std::filesystem::directory_iterator(motionDir)) {
+                if (entry.is_regular_file()) {
+                    auto ext = entry.path().extension().string();
+                    if (ext == ".motion" || ext == ".npz") {
+                        m_motionFiles.push_back(entry.path().string());
+                    }
+                }
+            }
+            // 排序使文件列表稳定
+            std::sort(m_motionFiles.begin(), m_motionFiles.end());
+        }
+        
+        std::cout << "Found " << m_motionFiles.size() << " motion files:" << std::endl;
+        for (const auto& f : m_motionFiles) {
+            std::cout << "  - " << f << std::endl;
+        }
+        
+        // 更新 GUI 的动作文件列表
+        m_guiPanel.motionFiles = m_motionFiles;
+    }
+    
+    // 加载指定的动作文件
+    bool loadMotionFile(const std::string& path) {
+        if (m_motionPlayer->loadMotion(path)) {
+            std::cout << "Loaded motion: " << path << " (" 
+                      << m_motionPlayer->getNumFrames() << " frames)" << std::endl;
+            m_motionLoaded = true;
+            
+            // 自动开始播放
+            m_motionPlayer->play();
+            
+            // 更新选中索引
+            for (size_t i = 0; i < m_motionFiles.size(); i++) {
+                if (m_motionFiles[i] == path) {
+                    m_guiPanel.selectedMotionIndex = i;
+                    break;
+                }
+            }
+            return true;
+        } else {
+            std::cerr << "Failed to load motion: " << path << std::endl;
+            return false;
+        }
+    }
+
 private:
     mf::Scene m_scene;
     mf::GuiPanel m_guiPanel;
@@ -479,6 +545,7 @@ private:
     bool m_showGrid = true;
     
     std::vector<std::string> m_jointNames;
+    std::vector<std::string> m_motionFiles;  // 可用的动作文件列表
     size_t m_selectedJoint = 0;
     
     float m_animTime = 0.0f;
