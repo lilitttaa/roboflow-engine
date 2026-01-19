@@ -128,6 +128,29 @@ public:
     bool walkSpeedChanged = false;       // 行走速度改变事件
     bool runSpeedChanged = false;        // 跑步速度改变事件
     int controllerMode = 0;              // 0=自由朝向, 1=锁定相机
+    
+    // ===== Motion Matching 控制 =====
+    bool motionMatchingEnabled = false;  // 是否启用 Motion Matching
+    bool motionMatchingToggled = false;  // 切换事件
+    int mmCurrentClip = 0;               // 当前片段索引
+    int mmCurrentFrame = 0;              // 当前帧索引
+    int mmTotalEntries = 0;              // 数据库条目数
+    int mmSearchInterval = 10;           // 搜索间隔
+    float mmBlendDuration = 0.2f;        // 混合时长
+    bool mmSearchIntervalChanged = false;
+    bool mmBlendDurationChanged = false;
+    
+    // Motion Matching 特征权重
+    float mmWeightTrajectoryPos = 1.0f;
+    float mmWeightTrajectoryFacing = 1.0f;
+    float mmWeightFootPos = 0.75f;
+    float mmWeightFootVel = 1.0f;
+    float mmWeightHipVel = 1.0f;
+    bool mmWeightsChanged = false;
+    
+    // 轨迹可视化
+    bool mmShowTrajectory = true;        // 是否显示轨迹
+    bool mmShowTrajectoryToggled = false;
 
 private:
     bool m_visible = true;

@@ -7,6 +7,8 @@
 #include "scene/Entity.hpp"
 #include "robot/RobotEntity.hpp"
 #include "motion/MotionPlayer.hpp"
+#include "motion/MotionMatching.hpp"
+#include "motion/MotionMatchingUtils.hpp"
 #include "gui/GuiPanel.hpp"
 #include "network/UDPStreamer.hpp"
 #include "network/JointMapper.hpp"
@@ -72,8 +74,27 @@ protected:
         }
         
         // 加载 G1 机器人
+        // 尝试多个可能的URDF路径
+        std::filesystem::path urdfPath = "assets/G1_jy/G1_jy.urdf";
+        if (!std::filesystem::exists(urdfPath)) {
+            // 尝试从可执行文件目录
+            std::filesystem::path exeDir = std::filesystem::current_path();
+            if (std::filesystem::exists(exeDir / "bin" / "assets" / "G1_jy" / "G1_jy.urdf")) {
+                urdfPath = exeDir / "bin" / "assets" / "G1_jy" / "G1_jy.urdf";
+            } else if (std::filesystem::exists(exeDir / "assets" / "G1_jy" / "G1_jy.urdf")) {
+                urdfPath = exeDir / "assets" / "G1_jy" / "G1_jy.urdf";
+            } else {
+                // 尝试从项目根目录
+                std::filesystem::path projectRoot = exeDir.parent_path().parent_path();
+                if (std::filesystem::exists(projectRoot / "assets" / "G1_jy" / "G1_jy.urdf")) {
+                    urdfPath = projectRoot / "assets" / "G1_jy" / "G1_jy.urdf";
+                }
+            }
+        }
+        
+        std::cout << "[Main] Trying to load URDF from: " << urdfPath << std::endl;
         m_robot = std::make_unique<mf::RobotEntity>();
-        if (m_robot->loadFromURDF("assets/G1_jy/G1_jy.urdf")) {
+        if (m_robot->loadFromURDF(urdfPath.string())) {
             m_robot->position = { 0.0f, 0.0f, 0.0f };
             m_robot->rotation = { -90.0f, 0.0f, 0.0f };  // URDF Z-up -> Y-up
             m_robot->scale = 1.0f;
@@ -104,6 +125,9 @@ protected:
             // 加载第一个动作文件（如果有）
             if (!m_motionFiles.empty()) {
                 loadMotionFile(m_motionFiles[0]);
+                
+                // 初始化 Motion Matching 数据库
+                initMotionMatching();
             } else {
                 std::cout << "No motion files found. Use simple animation." << std::endl;
             }
@@ -121,26 +145,69 @@ protected:
             if (m_scene.isThirdPersonMode()) {
                 m_useCharacterController = true;
                 m_characterController.enabled = true;
-                m_characterController.update(deltaTime);
                 
-                // ========== 坐标系转换 ==========
-                // 
-                // facingAngle (来自 CharacterController):
-                //   - 基于 atan2(x, z)
-                //   - 0=面向+Z, 90=面向+X, 180=面向-Z, -90=面向-X
-                //
-                // yawAngle (给 RobotEntity):
-                //   - Ry(yawAngle) 把机器人从默认朝向 +X 旋转
-                //   - 0=面向+X, 90=面向-Z, -90=面向+Z, 180=面向-X
-                //
-                // 映射公式：yawAngle = facingAngle - 90
-                //   - facingAngle=0(+Z) → yawAngle=-90 → Ry(-90°)把+X转到+Z ✓
-                //   - facingAngle=90(+X) → yawAngle=0 → 面向+X ✓
-                //   - facingAngle=180(-Z) → yawAngle=90 → Ry(90°)把+X转到-Z ✓
-                //   - facingAngle=-90(-X) → yawAngle=-180 → 面向-X ✓
-                //
-                m_robot->useYawMode = true;
-                m_robot->yawAngle = m_characterController.facingAngle - 90.0f;
+                // Motion Matching 模式
+                if (m_useMotionMatching && m_motionDatabase.isPreprocessed()) {
+                    // 禁用 CharacterController 的位置更新（只用于计算速度和朝向）
+                    m_characterController.updatePosition = false;
+                    m_characterController.update(deltaTime);
+                    
+                    // 确保 Motion Player 被禁用
+                    if (m_useMotionPlayer) {
+                        m_useMotionPlayer = false;
+                        m_guiPanel.useMotionPlayer = false;
+                    }
+                    
+                    // 判断控制模式（Free 或 Lock）
+                    bool isFreeMode = (m_characterController.controlMode == mf::ControlMode::FreeRotation);
+                    
+                    // 将角色控制器的速度传递给 Motion Matcher
+                    mf::MotionFrame frame = m_motionMatcher.update(
+                        deltaTime,
+                        m_characterController.velocity,
+                        m_characterController.facingAngle,
+                        isFreeMode
+                    );
+                    
+                    // 应用 Root Motion（位置和旋转由动画驱动）
+                    // frame.rootPos 现在包含的是相对位移（由 MotionMatcher 计算）
+                    Vector3 rootDelta = frame.rootPos;
+                    
+                    // 应用位移（Root Motion 在世界坐标系中）
+                    m_robot->position = Vector3Add(m_robot->position, rootDelta);
+                    
+                    // 应用旋转（由动画驱动，不被 CharacterController 覆盖）
+                    Quaternion rootRot = m_motionMatcher.getCurrentRootRotation();
+                    float yaw = mf::extractYawFromQuaternion(rootRot);
+                    m_robot->useYawMode = true;
+                    m_robot->yawAngle = yaw - 90.0f;  // 坐标系转换
+                    
+                    // 应用动作帧到机器人（应用关节角度）
+                    applyMotionFrame(frame);
+                } else {
+                    // 非 Motion Matching 模式：正常使用 CharacterController
+                    m_characterController.updatePosition = true;
+                    m_characterController.update(deltaTime);
+                    
+                    // ========== 坐标系转换 ==========
+                    // 
+                    // facingAngle (来自 CharacterController):
+                    //   - 基于 atan2(x, z)
+                    //   - 0=面向+Z, 90=面向+X, 180=面向-Z, -90=面向-X
+                    //
+                    // yawAngle (给 RobotEntity):
+                    //   - Ry(yawAngle) 把机器人从默认朝向 +X 旋转
+                    //   - 0=面向+X, 90=面向-Z, -90=面向+Z, 180=面向-X
+                    //
+                    // 映射公式：yawAngle = facingAngle - 90
+                    //   - facingAngle=0(+Z) → yawAngle=-90 → Ry(-90°)把+X转到+Z ✓
+                    //   - facingAngle=90(+X) → yawAngle=0 → 面向+X ✓
+                    //   - facingAngle=180(-Z) → yawAngle=90 → Ry(90°)把+X转到-Z ✓
+                    //   - facingAngle=-90(-X) → yawAngle=-180 → 面向-X ✓
+                    //
+                    m_robot->useYawMode = true;
+                    m_robot->yawAngle = m_characterController.facingAngle - 90.0f;
+                }
                 
                 // 调试输出
                 static int mainDebugCount = 0;
@@ -157,10 +224,10 @@ protected:
             // 键盘快捷键在 update 中处理
             handleKeyboardInput(deltaTime);
             
-            // 如果使用动作播放器，更新它
-            if (m_motionLoaded && m_useMotionPlayer) {
+            // 如果使用动作播放器，更新它（确保不与 Motion Matching 冲突）
+            if (m_motionLoaded && m_useMotionPlayer && !m_useMotionMatching) {
                 m_motionPlayer->update(deltaTime);
-            } else if (m_playAnimation) {
+            } else if (m_playAnimation && !m_useMotionMatching) {
                 // 简单动画
                 m_animTime += deltaTime;
                 float armSwing = sinf(m_animTime * 2.0f) * 0.3f;
@@ -387,6 +454,19 @@ protected:
             }
         }
         
+        // Motion Matching 切换 (N 键，仅在第三人称模式下)
+        if (IsKeyPressed(KEY_N) && isThirdPerson && m_motionDatabase.isPreprocessed()) {
+            m_useMotionMatching = !m_useMotionMatching;
+            if (m_useMotionMatching) {
+                // 启用 Motion Matching 时禁用 Motion Player
+                m_useMotionPlayer = false;
+                m_guiPanel.useMotionPlayer = false;
+                // 重置 Root Motion 跟踪
+                m_lastMotionRootPos = m_motionMatcher.getCurrentRootPosition();
+            }
+            std::cout << "[MotionMatching] " << (m_useMotionMatching ? "Enabled" : "Disabled") << std::endl;
+        }
+        
         // 在第三人称模式下，WASD/方向键被角色控制器使用，跳过动画快捷键
         if (m_motionLoaded && m_useMotionPlayer && !isThirdPerson) {
             // 动作播放器快捷键
@@ -499,6 +579,42 @@ protected:
         // 同步仿真进程状态
         m_guiPanel.sim2simRunning = m_processManager.isSim2SimRunning();
         m_guiPanel.deployRunning = m_processManager.isDeployRunning();
+        
+        // 同步 Motion Matching 状态（只同步只读状态，不覆盖用户可调参数）
+        m_guiPanel.motionMatchingEnabled = m_useMotionMatching;
+        if (m_motionDatabase.isPreprocessed()) {
+            // 只读状态
+            m_guiPanel.mmTotalEntries = m_motionDatabase.getNumEntries();
+            m_guiPanel.mmCurrentClip = m_motionMatcher.getCurrentClip();
+            m_guiPanel.mmCurrentFrame = m_motionMatcher.getCurrentFrame();
+        }
+        
+        // 处理 GUI 的 Motion Matching 事件（GUI -> Matcher）
+        if (m_guiPanel.motionMatchingToggled) {
+            m_useMotionMatching = m_guiPanel.motionMatchingEnabled;
+            if (m_useMotionMatching) {
+                // 启用 Motion Matching 时禁用 Motion Player
+                m_useMotionPlayer = false;
+                m_guiPanel.useMotionPlayer = false;
+                // 重置 Root Motion 跟踪
+                m_lastMotionRootPos = m_motionMatcher.getCurrentRootPosition();
+            }
+            m_guiPanel.motionMatchingToggled = false;
+        }
+        if (m_guiPanel.mmSearchIntervalChanged) {
+            m_motionMatcher.searchInterval = m_guiPanel.mmSearchInterval;
+            m_guiPanel.mmSearchIntervalChanged = false;
+        }
+        if (m_guiPanel.mmBlendDurationChanged) {
+            m_motionMatcher.blendDuration = m_guiPanel.mmBlendDuration;
+            m_guiPanel.mmBlendDurationChanged = false;
+        }
+        if (m_guiPanel.mmWeightsChanged) {
+            m_motionMatcher.weights().trajectoryPos = m_guiPanel.mmWeightTrajectoryPos;
+            m_motionMatcher.weights().trajectoryFacing = m_guiPanel.mmWeightTrajectoryFacing;
+            m_motionMatcher.weights().hipVel = m_guiPanel.mmWeightHipVel;
+            m_guiPanel.mmWeightsChanged = false;
+        }
     }
 
     void onRender() override {
@@ -521,6 +637,11 @@ protected:
             // 渲染机器人
             if (m_robotLoaded) {
                 m_robot->render();
+            }
+            
+            // 绘制 Motion Matching 轨迹可视化
+            if (m_guiPanel.mmShowTrajectory && m_useMotionMatching && m_scene.isThirdPersonMode()) {
+                drawMotionMatchingTrajectory();
             }
         }
         m_scene.end3D();
@@ -556,6 +677,21 @@ protected:
         m_motionFiles.clear();
         std::filesystem::path motionDir = "assets/motions";
         
+        // 如果当前目录找不到，尝试其他路径
+        if (!std::filesystem::exists(motionDir)) {
+            std::filesystem::path exeDir = std::filesystem::current_path();
+            if (std::filesystem::exists(exeDir / "bin" / "assets" / "motions")) {
+                motionDir = exeDir / "bin" / "assets" / "motions";
+            } else if (std::filesystem::exists(exeDir / "assets" / "motions")) {
+                motionDir = exeDir / "assets" / "motions";
+            } else {
+                std::filesystem::path projectRoot = exeDir.parent_path().parent_path();
+                if (std::filesystem::exists(projectRoot / "assets" / "motions")) {
+                    motionDir = projectRoot / "assets" / "motions";
+                }
+            }
+        }
+        
         if (std::filesystem::exists(motionDir)) {
             for (const auto& entry : std::filesystem::directory_iterator(motionDir)) {
                 if (entry.is_regular_file()) {
@@ -576,6 +712,182 @@ protected:
         
         // 更新 GUI 的动作文件列表
         m_guiPanel.motionFiles = m_motionFiles;
+    }
+    
+    // 绘制 Motion Matching 轨迹可视化
+    void drawMotionMatchingTrajectory() {
+        if (!m_robotLoaded) return;
+        
+        Vector3 robotPos = m_robot->position;
+        float facingAngle = m_characterController.facingAngle;
+        float facingRad = facingAngle * DEG2RAD;
+        
+        // 获取角色的局部前方和右方向
+        // facingAngle: 0=+Z, 90=+X, 180=-Z, -90=-X
+        Vector3 charForward = { sinf(facingRad), 0.0f, cosf(facingRad) };
+        Vector3 charRight = { cosf(facingRad), 0.0f, -sinf(facingRad) };
+        
+        // 获取输入和速度
+        Vector2 input = m_characterController.inputVector;
+        float speed = m_characterController.isRunning ? m_characterController.runSpeed : m_characterController.walkSpeed;
+        bool isMoving = m_characterController.isMoving;
+        
+        // 轨迹点时间
+        const float times[] = {0.2f, 0.4f, 0.6f, 1.0f};
+        Vector3 prevPoint = robotPos;
+        prevPoint.y = 0.02f;
+        
+        // 根据控制模式计算轨迹
+        bool isLockMode = (m_characterController.controlMode == mf::ControlMode::LockToCamera);
+        
+        for (int i = 0; i < 4; ++i) {
+            float t = times[i];
+            Vector3 predictedPos;
+            float predictedFacing = facingAngle;
+            
+            if (isMoving) {
+                if (isLockMode) {
+                    // Lock 模式：基于相机方向移动，角色朝向不变
+                    float camYaw = m_scene.thirdPersonCamera.yaw;
+                    float camYawRad = camYaw * DEG2RAD;
+                    Vector3 camForward = { -sinf(camYawRad), 0.0f, -cosf(camYawRad) };
+                    Vector3 camRight = { cosf(camYawRad), 0.0f, -sinf(camYawRad) };
+                    
+                    Vector3 moveDir = {
+                        camForward.x * input.y + camRight.x * input.x,
+                        0.0f,
+                        camForward.z * input.y + camRight.z * input.x
+                    };
+                    
+                    predictedPos = {
+                        robotPos.x + moveDir.x * speed * t,
+                        0.02f,
+                        robotPos.z + moveDir.z * speed * t
+                    };
+                } else {
+                    // Free 模式：角色朝向移动方向，始终往前走
+                    // 在 Free 模式下，轨迹就是角色前方
+                    predictedPos = {
+                        robotPos.x + charForward.x * speed * t,
+                        0.02f,
+                        robotPos.z + charForward.z * speed * t
+                    };
+                }
+            } else {
+                // 不移动时，轨迹就在原地
+                predictedPos = {robotPos.x, 0.02f, robotPos.z};
+            }
+            
+            // 绘制轨迹线（绿色 = 期望轨迹）
+            DrawLine3D(prevPoint, predictedPos, GREEN);
+            
+            // 绘制轨迹点
+            DrawSphere(predictedPos, 0.03f, GREEN);
+            
+            // 绘制朝向指示器
+            float predictedRad = predictedFacing * DEG2RAD;
+            float arrowLen = 0.12f;
+            Vector3 arrowEnd = {
+                predictedPos.x + sinf(predictedRad) * arrowLen,
+                predictedPos.y + 0.01f,
+                predictedPos.z + cosf(predictedRad) * arrowLen
+            };
+            DrawLine3D(predictedPos, arrowEnd, LIME);
+            
+            prevPoint = predictedPos;
+        }
+        
+        // 绘制当前朝向（黄色箭头）
+        Vector3 arrowStart = robotPos;
+        arrowStart.y = 0.5f;
+        float arrowLen = 0.4f;
+        Vector3 arrowEnd = {
+            arrowStart.x + charForward.x * arrowLen,
+            arrowStart.y,
+            arrowStart.z + charForward.z * arrowLen
+        };
+        DrawLine3D(arrowStart, arrowEnd, YELLOW);
+        DrawSphere(arrowEnd, 0.02f, YELLOW);
+        
+        // 绘制当前速度向量（蓝色）
+        Vector3 velocity = m_characterController.velocity;
+        float velLen = Vector3Length(velocity);
+        if (velLen > 0.1f) {
+            Vector3 velEnd = {
+                arrowStart.x + velocity.x * 0.25f,
+                arrowStart.y,
+                arrowStart.z + velocity.z * 0.25f
+            };
+            DrawLine3D(arrowStart, velEnd, BLUE);
+            DrawSphere(velEnd, 0.015f, BLUE);
+        }
+        
+        // 显示当前状态文本
+        const char* modeText = isLockMode ? "LOCK" : "FREE";
+        const char* movingText = isMoving ? "Moving" : "Idle";
+        // DrawText3D 不可用，在 2D 层显示
+    }
+    
+    // 初始化 Motion Matching
+    void initMotionMatching() {
+        std::cout << "\n[MotionMatching] Initializing..." << std::endl;
+        
+        // 加载所有动作文件到数据库
+        for (const auto& path : m_motionFiles) {
+            m_motionDatabase.loadClip(path);
+        }
+        
+        // 预处理数据库
+        m_motionDatabase.preprocess();
+        
+        // 设置 matcher
+        m_motionMatcher.setDatabase(&m_motionDatabase);
+        
+        // 默认禁用 Motion Matching，按 N 键切换
+        m_useMotionMatching = false;
+        
+        std::cout << "[MotionMatching] Ready! Press N to toggle Motion Matching mode." << std::endl;
+    }
+    
+    // 应用动作帧到机器人
+    void applyMotionFrame(const mf::MotionFrame& frame) {
+        if (!m_robot || !m_robotLoaded) return;
+        
+        // 应用关节角度
+        const auto& jointNames = m_motionDatabase.getJointNames();
+        
+        // 使用 MotionPlayer 的关节映射
+        static const std::map<std::string, std::string> jointMapping = {
+            {"left_hip_pitch_joint", "leg_l1_joint"},
+            {"left_hip_roll_joint", "leg_l2_joint"},
+            {"left_hip_yaw_joint", "leg_l3_joint"},
+            {"left_knee_joint", "leg_l4_joint"},
+            {"left_ankle_pitch_joint", "leg_l5_joint"},
+            {"left_ankle_roll_joint", "leg_l6_joint"},
+            {"right_hip_pitch_joint", "leg_r1_joint"},
+            {"right_hip_roll_joint", "leg_r2_joint"},
+            {"right_hip_yaw_joint", "leg_r3_joint"},
+            {"right_knee_joint", "leg_r4_joint"},
+            {"right_ankle_pitch_joint", "leg_r5_joint"},
+            {"right_ankle_roll_joint", "leg_r6_joint"},
+            {"waist_yaw_joint", "waist_joint"},
+            {"left_shoulder_pitch_joint", "arm_l1_joint"},
+            {"left_shoulder_roll_joint", "arm_l2_joint"},
+            {"left_shoulder_yaw_joint", "arm_l3_joint"},
+            {"left_elbow_joint", "arm_l4_joint"},
+            {"right_shoulder_pitch_joint", "arm_r1_joint"},
+            {"right_shoulder_roll_joint", "arm_r2_joint"},
+            {"right_shoulder_yaw_joint", "arm_r3_joint"},
+            {"right_elbow_joint", "arm_r4_joint"},
+        };
+        
+        for (size_t i = 0; i < std::min(jointNames.size(), frame.jointPos.size()); ++i) {
+            const std::string& motionJoint = jointNames[i];
+            auto it = jointMapping.find(motionJoint);
+            if (it != jointMapping.end()) {
+                m_robot->setJointPosition(it->second, frame.jointPos[i]);
+            }
+        }
     }
     
     // 加载指定的动作文件
@@ -610,6 +922,12 @@ private:
     std::unique_ptr<mf::RobotEntity> m_robot;
     std::unique_ptr<mf::MotionPlayer> m_motionPlayer;
     mf::UDPStreamer m_streamer;  // UDP 流式传输到 gentle-humanoid
+    
+    // Motion Matching
+    mf::MotionDatabase m_motionDatabase;
+    mf::MotionMatcher m_motionMatcher;
+    bool m_useMotionMatching = false;  // 是否使用 Motion Matching
+    
     bool m_robotLoaded = false;
     bool m_motionLoaded = false;
     bool m_useMotionPlayer = true;
@@ -628,6 +946,9 @@ private:
     
     // 自动连接延迟计时器
     float m_autoConnectDelay = 0.0f;
+    
+    // Motion Matching Root Motion 跟踪
+    Vector3 m_lastMotionRootPos = {0, 0, 0};
 };
 
 int main() {

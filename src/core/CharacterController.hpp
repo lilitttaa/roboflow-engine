@@ -48,6 +48,7 @@ public:
     bool isMoving = false;
     bool isRunning = false;
     bool enabled = true;
+    bool updatePosition = true;  // 是否更新位置（Motion Matching 模式下设为 false）
     
     // 调试帧计数
     int debugFrameCount = 0;
@@ -206,8 +207,8 @@ inline void CharacterController::update(float deltaTime) {
     // 更新速度标量
     speed = Vector3Length(velocity);
     
-    // 更新位置
-    if (targetPosition && speed > 0.001f) {
+    // 更新位置（如果启用）
+    if (updatePosition && targetPosition && speed > 0.001f) {
         *targetPosition = Vector3Add(*targetPosition, Vector3Scale(velocity, deltaTime));
     }
     

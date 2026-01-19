@@ -374,7 +374,93 @@ void GuiPanel::render() {
         DrawText("WASD: Move | Shift: Run | C: Mode", x, y, 11, GRAY);
         y += 14;
         DrawText("Alt: Unlock Mouse | Tab: Camera", x, y, 11, GRAY);
+        y += 14;
+        DrawText("N: Toggle Motion Matching", x, y, 11, GRAY);
         y += 20;
+    }
+    
+    // ===== Motion Matching 控制 =====
+    if (isThirdPersonMode) {
+        // 分隔线
+        DrawLine(x, y, x + width, y, Color{80, 80, 80, 255});
+        y += 10;
+        
+        GuiLabel(Rectangle{(float)x, (float)y, (float)width, 20}, "Motion Matching");
+        y += 22;
+        
+        // 启用/禁用开关
+        bool prevEnabled = motionMatchingEnabled;
+        GuiCheckBox(Rectangle{(float)x, (float)y, 20, 20}, "Enable Motion Matching", &motionMatchingEnabled);
+        if (motionMatchingEnabled != prevEnabled) {
+            motionMatchingToggled = true;
+        }
+        y += 24;
+        
+        if (motionMatchingEnabled) {
+            // 状态显示
+            DrawText(TextFormat("Clip: %d  Frame: %d", mmCurrentClip, mmCurrentFrame), x, y, 12, LIGHTGRAY);
+            y += 16;
+            DrawText(TextFormat("Database: %d entries", mmTotalEntries), x, y, 12, LIGHTGRAY);
+            y += 20;
+            
+            // 搜索间隔
+            GuiLabel(Rectangle{(float)x, (float)y, 80, 16}, "Search Int:");
+            float searchInt = (float)mmSearchInterval;
+            float prevSearchInt = searchInt;
+            GuiSlider(Rectangle{(float)(x + 80), (float)y, (float)(width - 80), 16}, nullptr, 
+                      TextFormat("%d", mmSearchInterval), &searchInt, 1.0f, 30.0f);
+            mmSearchInterval = (int)searchInt;
+            if (searchInt != prevSearchInt) {
+                mmSearchIntervalChanged = true;
+            }
+            y += 20;
+            
+            // 混合时长
+            GuiLabel(Rectangle{(float)x, (float)y, 80, 16}, "Blend Time:");
+            float prevBlend = mmBlendDuration;
+            GuiSlider(Rectangle{(float)(x + 80), (float)y, (float)(width - 80), 16}, nullptr, 
+                      TextFormat("%.2f", mmBlendDuration), &mmBlendDuration, 0.05f, 0.5f);
+            if (mmBlendDuration != prevBlend) {
+                mmBlendDurationChanged = true;
+            }
+            y += 24;
+            
+            // 特征权重
+            DrawText("Feature Weights:", x, y, 12, LIGHTGRAY);
+            y += 16;
+            
+            // 轨迹位置权重
+            GuiLabel(Rectangle{(float)x, (float)y, 70, 14}, "Traj Pos:");
+            float prevTrajPos = mmWeightTrajectoryPos;
+            GuiSlider(Rectangle{(float)(x + 70), (float)y, (float)(width - 70), 14}, nullptr, 
+                      TextFormat("%.1f", mmWeightTrajectoryPos), &mmWeightTrajectoryPos, 0.0f, 3.0f);
+            if (mmWeightTrajectoryPos != prevTrajPos) mmWeightsChanged = true;
+            y += 18;
+            
+            // 轨迹朝向权重
+            GuiLabel(Rectangle{(float)x, (float)y, 70, 14}, "Traj Face:");
+            float prevTrajFace = mmWeightTrajectoryFacing;
+            GuiSlider(Rectangle{(float)(x + 70), (float)y, (float)(width - 70), 14}, nullptr, 
+                      TextFormat("%.1f", mmWeightTrajectoryFacing), &mmWeightTrajectoryFacing, 0.0f, 3.0f);
+            if (mmWeightTrajectoryFacing != prevTrajFace) mmWeightsChanged = true;
+            y += 18;
+            
+            // 髋部速度权重
+            GuiLabel(Rectangle{(float)x, (float)y, 70, 14}, "Hip Vel:");
+            float prevHipVel = mmWeightHipVel;
+            GuiSlider(Rectangle{(float)(x + 70), (float)y, (float)(width - 70), 14}, nullptr, 
+                      TextFormat("%.1f", mmWeightHipVel), &mmWeightHipVel, 0.0f, 3.0f);
+            if (mmWeightHipVel != prevHipVel) mmWeightsChanged = true;
+            y += 22;
+            
+            // 显示轨迹开关
+            bool prevShowTraj = mmShowTrajectory;
+            GuiCheckBox(Rectangle{(float)x, (float)y, 20, 20}, "Show Trajectory", &mmShowTrajectory);
+            if (mmShowTrajectory != prevShowTraj) {
+                mmShowTrajectoryToggled = true;
+            }
+            y += 28;
+        }
     }
     
     // 分隔线

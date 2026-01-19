@@ -24,9 +24,7 @@ message(STATUS "raylib fetched and configured")
 # 安装: sudo apt install libassimp-dev
 # ============================================================================
 find_package(assimp REQUIRED)
-message(STATUS "Assimp found: ${assimp_VERSION}")
-
-# ============================================================================
+message(STATUS "Assimp found: ${assimp_VERSION}")# ============================================================================
 # tinyxml2 - 使用系统安装的库 (使用 pkg-config)
 # 安装: sudo apt install libtinyxml2-dev
 # ============================================================================
